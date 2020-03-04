@@ -17,7 +17,8 @@
   "
   (:require [thermos.opt.supply.specs :refer [supply-problem]]
             [thermos.opt.money :refer [pv-recurring pv-sequence
-                                       *discount-rate* *accounting-period*]]))
+                                       *discount-rate* *accounting-period*]]
+            [com.rpl.specter :as s]))
 
 (defn equivalize-costs
   "Given a supply problem, put equilvalized costs into it
@@ -38,8 +39,8 @@
           (fn [capex-part opex-part lifetime]
             (pv-sequence
              (map +
-                  (cycle (conj (or capex-part 0)
-                               (repeat (dec lifetime) 0)))
+                  (cycle (conj (repeat (dec lifetime) 0)
+                               (or capex-part 0)))
                   (repeat (or opex-part 0)))))
           
           set-present-cost ;; set the present cost for a gadget
@@ -85,7 +86,7 @@
   [problem]
   [supply-problem :ret any?]
   
-  (let [problem (equilvalize-costs problem)
+  (let [problem (equivalize-costs problem)
 
         {curtailment-cost :curtailment-cost
          can-dump-heat    :can-dump-heat
@@ -103,11 +104,11 @@
         day-slice-hours   (->> (for [[i l] day-lengths] [i (/ 24.0 l)])
                                (into {}))
 
-        day-slice-weight  (->> (for [[i day] (map-indexed vector profile)]
-                                 [i (* (day-slice-hours i) (:frequency day))])
+        day-slice-weight  (->> (for [[i day] profile]
+                                      [i (* (day-slice-hours i) (:frequency day))])
                                (into {}))
         
-        time-slices       (set (for [[i day] (map-indexed vector profile)
+        time-slices       (set (for [[i day] profile
                                      s       (range (day-lengths i))]
                                  [i s]))
 
@@ -188,20 +189,21 @@
         (fn [[d hh]] (-> profile d :heat-demand (nth hh)))
         ]
     {:vars
-     {:BUILD-PLANT    {:type :binary       :indexed-by [plant-types]}
-      :PLANT-SIZE-KWP {:type :non-negative :indexed-by [plant-types]}
-      :HEAT-OUTPUT-KW {:type :non-negative :indexed-by [plant-types time-slices]}
-      :PLANT-COST     {:type :non-negative :indexed-by [plant-types]}
+     (cond->
+         {:BUILD-PLANT    {:type :binary       :indexed-by [plant-types]}
+          :PLANT-SIZE-KWP {:type :non-negative :indexed-by [plant-types]}
+          :HEAT-OUTPUT-KW {:type :non-negative :indexed-by [plant-types time-slices]}
+          :PLANT-COST     {:type :non-negative :indexed-by [plant-types]}
+          :CURT-KW        {:type :non-negative :indexed-by [time-slices]}}
 
-      :BUILD-STORE    {:type :binary       :indexed-by [store-types]}
-      :STORE-COST     {:type :non-negative :indexed-by [store-types]}
-      :STORE-SIZE-KWH {:type :non-negative :indexed-by [store-types]}
-      :FLOW-IN-KW     {:type :non-negative :indexed-by [store-types time-slices]}
-      :FLOW-OUT-KW    {:type :non-negative :indexed-by [store-types time-slices]}
-      :CHARGE-KWH     {:type :non-negative :indexed-by [store-types time-slices]} 
-
-      :CURT-KW        {:type :non-negative :indexed-by [time-slices]}
-      }
+       (not-empty store-types) ;; add store vars in only if there are any
+       (merge
+        {:BUILD-STORE    {:type :binary       :indexed-by [store-types]}
+         :STORE-COST     {:type :non-negative :indexed-by [store-types]}
+         :STORE-SIZE-KWH {:type :non-negative :indexed-by [store-types]}
+         :FLOW-IN-KW     {:type :non-negative :indexed-by [store-types time-slices]}
+         :FLOW-OUT-KW    {:type :non-negative :indexed-by [store-types time-slices]}
+         :CHARGE-KWH     {:type :non-negative :indexed-by [store-types time-slices]}}))
 
      :minimize
      [:+
@@ -282,7 +284,6 @@
         [:<= [:CHARGE-KWH s t] [:STORE-SIZE-KWH s]])
       
       ;; TODO emissions limits
-      )})
-  )
+      )}))
 
 

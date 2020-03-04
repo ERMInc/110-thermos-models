@@ -129,3 +129,31 @@
     combined-profile))
 
 
+(defn create-input-profile
+  "Our profile is stored in a different format for presentation, so we
+  need to do the mangling to make it have the right peak, and then we
+  need to reassemble it into a single input profile of the sort that
+  goes in a supply problem.
+  "
+  [profile buildings target-demand target-peak]
+  (let [day-types     (:day-types profile)
+        heat-profiles (:heat-profiles profile)
+
+        system-profile (combine-buildings
+                        (:day-types profile)
+                        (:heat-profiles profile)
+                        buildings ;; somewhere we need to transform
+                        ;; from namespaced keywords
+                        target-demand target-peak)]
+    (->> (for [[day frequency] day-types]
+           [day
+            {:frequency frequency
+             :heat-demand (:values (get system-profile day))
+             :grid-offer  (get (:grid-offer profile) day)
+             :fuel
+             (->> (for [[fuel prices] (:fuel-prices profile)]
+                    [fuel (merge {:price (get prices day)}
+                                 (-> profile :emissions-factors (get fuel) (get day)))])
+                  (into {}))}])
+         (into {}))))
+
