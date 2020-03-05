@@ -1,8 +1,5 @@
 (ns thermos.opt.net.core
-  "Thermos network optimisation model.
-  Partially translated from the python"
-  )
-
+  "Thermos network optimisation model. Translated from the python version.")
 
 (defn construct-mip [problem]
   (let [;; indexing sets here
@@ -25,12 +22,15 @@
         ins-types  (set (mapcat (comp keys :insulation)   (:vertices problem)))
 
         ;; constants
-        flow-bound-slack 1.5
+        flow-bound-slack (:flow-bound-slack problem 1.5)
+
         flow-upper-bound (fn [a t])
-        hours-per-year (* 24 365)
+
+        hours-per-year (* 24.0 365)
         years-per-hour (/ 1.0 hours-per-year)
 
         vertices   (assoc-by :id (:vertices problem))
+        emissions  (:emissions problem)
         arc-map    (merge (assoc-by (juxt :i :j) (:edges problem))
                           (assoc-by (juxt :j :i) (:edges problem)))
         
@@ -39,7 +39,7 @@
         demand-kwh (fn [i] (or (-> vertices (get i) :demand :kwh) 0))
 
         demand-is-required
-        (fn [i] (-> vertices (get i) :demand :required))
+        (fn [i] (boolean (-> vertices (get i) :demand :required)))
 
         demand-kw  (fn [i t]
                      (if (= :mean t)
@@ -54,14 +54,64 @@
         (fn [e] (let [e (get arc-map e)]
                   (if e (* (:length e 0) (:cost-per-kwm e 0)) 0)))
 
-        supply-max-capacity (fn [i] (-> vertices (get i) :supply :capacity))
-        supply-count-max 0
+        supply-max-capacity (fn [i] (or (-> (vertices i) :supply :capacity-kw) 0))
+        supply-fixed-cost   (fn [i] (or (-> (vertices i) :supply :cost) 0))
+        supply-cost-per-kwh (fn [i] (or (-> (vertices i) :supply :cost-per-kwh) 0))
+        supply-cost-per-kwp (fn [i] (or (-> (vertices i) :supply :cost-per-kwp) 0))
+        supply-emissions-per-kw (fn [i e]
+                                  (* (or (-> (vertices i) :suppy :emissions (get e)) 0)
+                                     hours-per-year))
+        
 
+        vertex-fixed-value   (fn [i] (or (-> (vertices i) :demand :value) 0))
+        vertex-value-per-kwp (fn [i] (or (-> (vertices i) :demand :value-per-kwp) 0))
+        vertex-value-per-kwh (fn [i] (or (-> (vertices i) :demand :value-per-kwh) 0))
+        
+        neighbours (for [[i ijs] (group-by first arcs)]
+                     [i (set (map second ijs))])
+        
+        supply-count-max         (:supply-limit problem)
+
+        emissions-cost-per-kg    (fn [e] (or (-> (emissions e) :cost) 0))
+        emissions-limit          (fn [e] (-> (emissions e) :limit))
+
+        insulation-attr          (fn [i it a]
+                                   (-> (vertices i) :demand :insulation
+                                       (get it) (get a)))
+
+        insulation-allowed       (fn [i it]
+                                   (-> (vertices i) :demand :insulation (contains? it)))
+        insulation-fixed-cost    (fn [i it] (or (insulation-attr i it :cost) 0))
+        insulation-cost-per-kwh  (fn [i it] (or (insulation-attr i it :cost-per-kwh) 0))
+        insulation-max-kwh       (fn [i it] (or (insulation-attr i it :maximum) 0))
+        insulation-min-kwh       (fn [i it] (or (insulation-attr i it :minimum) 0))
+
+        alternative-attr         (fn [i at a]
+                                   (-> (vertices i) :demand :alternatives (get at) (get a)))
+
+        alternative-allowed      (fn [i a]
+                                   (-> (vertices i) :demand :alternatives (contains? a)))
+        
+        alternative-fixed-cost   (fn [i a] (or (alternative-attr i a :cost) 0))
+        alternative-cost-per-kwp (fn [i a] (or (alternative-attr i a :cost-per-kwp) 0))
+        alternative-cost-per-kwh (fn [i a] (or (alternative-attr i a :cost-per-kwh) 0))
+        alternative-emissions-per-kwh (fn [i a e]
+                                        (or (-> (vertices i) :demand :alternatives (get a)
+                                                :emissions (get e))
+                                            0))
+
+        total-max-insulation     (into {} (for [[i v] vertices]
+                                            [i (-> v :demand :insulation vals
+                                                   (->> (keep :maximum)
+                                                        (reduce + 0)))]))
+        
+        ;; Some common subexpressions:
+        
         total-emissions
         (fn [e]
           [+
-           (for [i svtx] [* [:SUPPLY-KW i :mean] (supply-emissions-per-kw i)])
-           (for [i dvtx a alt-types :let [f (alt-emissions-per-kwh i a)]]
+           (for [i svtx] [* [:SUPPLY-KW i :mean] (supply-emissions-per-kw i e)])
+           (for [i dvtx a alt-types :let [f (alternative-emissions-per-kwh i a e)]]
              [-
               [* [:ALT-IN i a] (demand-kwh i) f]
               [* [:ALT-AVOIDED-KWH i a] f]])])
@@ -128,7 +178,7 @@
              [-
               [* [:ALT-IN i a]
                (+ (alternative-fixed-cost i a)
-                  (* (alternative-cost-per-kw i a)  (demand-kwp i))
+                  (* (alternative-cost-per-kwp i a) (demand-kwp i))
                   (* (alternative-cost-per-kwh i a) (demand-kwh i)))]
 
               ;; don't pay for what we didn't use due to insulation
@@ -167,7 +217,7 @@
          0
          (unmet-demand i t)
          (if (and [= :mean t] (contains? dvtx i))
-           [* [:AVOIDED-DEMAND-KWH i] years-per-hour]
+           [* (avoided-demand-kwh i) years-per-hour]
            0)])
 
       ;; Constraints for arcs
@@ -194,7 +244,7 @@
         [<= [+ (for [i svtx] [:SVIN i])] supply-count-max])
       
       ;; emissions limits
-      (for [e emissions
+      (for [e emission
             :let [lim (emissions-limit e)] :when lim]
         [<= (total-emissions e) lim])
 
@@ -220,15 +270,18 @@
       
       )
      
-     :params
-     {:EDGE-DIVERSITY {:indexed-by [edge]}
-      :SUPPLY-DIVERSITY {:indexed-by [svtx]}
-      :LOSS-KW {:indexed-by [edge]}}
-
      :vars
      ;; TODO fixed values
      (cond->
-         {:DVIN {:type :binary :indexed-by [dvtx]}
+         { ;; really these are params not vars
+          :EDGE-DIVERSITY   {:indexed-by [edge] :fixed true}
+          :SUPPLY-DIVERSITY {:indexed-by [svtx] :fixed true}
+          :LOSS-KW          {:indexed-by [edge] :fixed true}
+
+          :DVIN {:type :binary :indexed-by [dvtx]
+                 :value demand-is-required
+                 :fixed demand-is-required}
+          
           :AIN  {:type :binary :indexed-by [arcs]}
           :SVIN {:type :binary :indexed-by [svtx]}
 
@@ -237,21 +290,54 @@
           :SUPPLY-CAP-KW {:type :non-negative :indexed-by [svtx]}
           :SUPPLY-KW {:type :non-negative :indexed-by [svtx]}}
 
-       (seq alt-types)
+       (not-empty alt-types)
        (merge
         ;; TODO restrict indices to valid combinations
-        {:ALT-IN {:type :binary :indexed-by [dvtx alt-types]}
-         :ALT-AVOIDED-KWH {:type :non-negative :indexed-by [dvtx alt-types]}})
-
-       (seq ins-types)
-       (merge
-        ;; TODO restrict indices to valid combinations
-        {:INSULATION-KWH {:type :non-negative :indexed-by [dvtx ins-types]}
-         :INSULATION-IN {:type :binary :indexed-by [dvtx ins-types]}
+        {:ALT-IN          {:type :binary :indexed-by [dvtx alt-types]
+                           :value (fn [i a] (when-not (alternative-allowed i a) false))
+                           :fixed (fn [i a] (when-not (alternative-allowed i a) true))}
          
+         :ALT-AVOIDED-KWH {:type :non-negative :indexed-by [dvtx alt-types]
+                           :upper (fn [i a]
+                                    (if (alternative-allowed i a)
+                                      (total-max-insulation i) ;; tighten to insulation max
+                                      0))
+                           :lower 0}})
+
+       (not-empty ins-types)
+       (merge
+        ;; TODO restrict indices to valid combinations
+        {:INSULATION-KWH {:type :non-negative :indexed-by [dvtx ins-types]
+                          :lower insulation-min-kwh
+                          :upper insulation-max-kwh}
+         :INSULATION-IN {:type :binary :indexed-by [dvtx ins-types]
+                         :value (fn [i it] (when-not (insulation-allowed i it) false))
+                         :fixed (fn [i it] (when-not (insulation-allowed i it) true))}
          }
-        )
-       )
-     
-     })
-  )
+        ))
+     }))
+
+(defn- compute-edge-diversity
+  "Return a map {[i j] => diversity}"
+  [mip])
+
+(defn- compute-supply-diversity
+  "Return a map {i => diversity}."
+
+  [mip])
+
+(defn- compute-edge-losses
+  "Return a map {[i j] => losses-kw}"
+  [mip])
+
+(defn parameterise
+  "Given a MIP from construct-mip above (which may have a solution on it)
+  Compute and install the values for :EDGE-DIVERSITY :SUPPLY-DIVERSITY and :LOSS-KW
+  which are not determined within the program. "
+
+  [mip]
+  (update mip :vars
+          #(-> %
+               (assoc-in [:EDGE-DIVERSITY :value]   (compute-edge-diversity mip))
+               (assoc-in [:SUPPLY-DIVERSITY :value] (compute-supply-diversity mip))
+               (assoc-in [:LOSS-KW :value]          (compute-edge-losses mip)))))
