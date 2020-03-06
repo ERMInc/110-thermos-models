@@ -1,15 +1,18 @@
 (ns thermos.opt.net.core
-  "Thermos network optimisation model. Translated from the python version.")
+  "Thermos network optimisation model. Translated from the python version."
+  (:require [lp.scip :as scip]
+            [com.rpl.specter :as s]))
+
+(defn- edge
+  ([i j] (if (< i j) [i j] [j i]))
+  ([[i j]] (edge i j)))
+
+(defn- invert [e] [(second e) (first e)])
 
 (defn construct-mip [problem]
-  (let [;; indexing sets here
-        edge (fn edge
-               ([i j] (if (< i j) [i j] [j i]))
-               ([[i j]] (edge i j)))
-        
+  (let [;; indexing sets
         vtx        (set (map :id (:vertices problem)))
-        edges      (set (for [e (:edges problem)]
-                          (edge (:i e) (:j e))))
+        edges      (set (for [e (:edges problem)] (edge (:i e) (:j e))))
         
         arcs       (set (concat edges (map (comp vec reverse) edges)))
         
@@ -24,15 +27,13 @@
         ;; constants
         flow-bound-slack (:flow-bound-slack problem 1.5)
 
-        flow-upper-bound (fn [a t])
-
         hours-per-year (* 24.0 365)
         years-per-hour (/ 1.0 hours-per-year)
 
         vertices   (assoc-by :id (:vertices problem))
         emissions  (:emissions problem)
-        arc-map    (merge (assoc-by (juxt :i :j) (:edges problem))
-                          (assoc-by (juxt :j :i) (:edges problem)))
+        arc-map    (merge (assoc-by (comp vec (juxt :i :j)) (:edges problem))
+                          (assoc-by (comp vec (juxt :j :i)) (:edges problem)))
         
         ;; accessor functions
         demand-kwp (fn [i] (or (-> vertices (get i) :demand :kwp) 0))
@@ -119,8 +120,8 @@
         unmet-demand
         (fn [i t]
           (let [neighbours (neighbours i)
-                flow-in  [+ (for [j neighbours] [:FLOW-KW [j i] t])]
-                flow-out [+ (for [j neighbours] [:FLOW-KW [i j] t])]
+                flow-in  [+ (for [j neighbours] [:ARC-FLOW-KW [j i] t])]
+                flow-out [+ (for [j neighbours] [:ARC-FLOW-KW [i j] t])]
 
                 losses   (if (= :mean period)
                            [+ (for [j neighbours] [* [:LOSS-KW (edge i j)] [:AIN [j i]]])]
@@ -191,6 +192,56 @@
 
         ;; wrap in a function so we can return 0 in case nothing there.
         avoided-demand-kwh #(get avoided-demand-kwh % 0.0)
+
+        ;; Utilities for computing parameters & bounds
+        edge-length (-> (for [[a e] arc-map] [a (:length e)]) (into {}))
+
+        loss-w-per-kwp (interpolate
+                        (-> problem :pipe-losses (:kwp     [0]))
+                        (-> problem :pipe-losses (:w-per-m [0])))
+        
+        edge-loss-kw-for-kwp
+        (fn [e kwp]
+          (* (edge-length e) (/ (loss-w-per-kwp kwp) 1000.0)))
+
+        max-loss-kw
+        (reduce
+         +
+         (for [e edge]
+           (let [[[_ max-fwd] [_ max-back]]
+                 (-> (get arc-map e) :bounds :peak)
+                 max-fwd (or max-fwd 0)
+                 max-back (or max-back 0)]
+             (edge-loss-kw-for-kwp e (max max-fwd max-back)))))
+        
+        arc-max-mean-flow
+        (into
+         {}
+         (for [a arc]
+           (let [edge (get arc-map a)
+                 [[_ max-fwd] [_ max-back]] (-> edge :bounds :mean)]
+             ;; question here is whether a is same direction or reverse direction
+             [a (if (= (:i edge) (first a)) max-fwd max-back)])))
+        
+        arc-max-peak-flow
+        (into
+         {}
+         (for [a arc]
+           (let [edge (get arc-map a)
+                 [[_ max-fwd] [_ max-back]] (-> edge :bounds :peak)]
+             ;; question here is whether a is same direction or reverse direction
+             [a (if (= (:i edge) (first a)) max-fwd max-back)])))
+
+        flow-upper-bound (fn [a p]
+                           (case p
+                             :mean (+ max-loss-kw (arc-max-mean-flow a))
+                             :peak (arc-max-peak-flow a)))
+
+        diversity (diversity-factor problem)
+
+        total-count (reduce + (map #(:count % 1) (:vertices problem)))
+        
+        initial-supply-diversity (diversity total-count)
         ]
     {:maximize
      [- total-connection-value
@@ -209,7 +260,7 @@
 
       ;; force AIN if we use flow
       (for [a arc t period]
-        [<= [:FLOW-KW a t] [* [:AIN a] flow-bound-slack (flow-upper-bound a t)]])
+        [<= [:ARC-FLOW-KW a t] [* [:AIN a] flow-bound-slack [:lp.core/upper [:ARC-FLOW-KW a t]]]])
 
       ;; Flow balance at each vertex
       (for [i vtx t period]
@@ -224,11 +275,11 @@
       (for [a arc]
         [:and
          ;; Arcs carry their losses
-         [>= [:FLOW-KW a :mean] [* [:AIN a] [:LOSS-KW (edge a)]]]
+         [>= [:ARC-FLOW-KW a :mean] [* [:AIN a] [:LOSS-KW (edge a)]]]
          ;; Edges have capacity for peak flow
-         [>= [:EDGE-CAP-KW (edge a)] [* [:FLOW-KW a :peak] [:EDGE-DIVERSITY e]]]
+         [>= [:EDGE-CAP-KW (edge a)] [* [:ARC-FLOW-KW a :peak] [:EDGE-DIVERSITY e]]]
          ;; Edges have capacity for mean flow
-         [>= [:EDGE-CAP-KW (edge a)] [:FLOW-KW a :mean]]])
+         [>= [:EDGE-CAP-KW (edge a)] [:ARC-FLOW-KW a :mean]]])
       
       ;; supply capacity sufficient
       (for [i svtx]
@@ -271,13 +322,32 @@
       )
      
      :vars
-     ;; TODO fixed values
      (cond->
-         { ;; really these are params not vars
-          :EDGE-DIVERSITY   {:indexed-by [edge] :fixed true}
-          :SUPPLY-DIVERSITY {:indexed-by [svtx] :fixed true}
-          :LOSS-KW          {:indexed-by [edge] :fixed true}
+         {;; PARAMETERS (fixed = true)
+          
+          :EDGE-DIVERSITY
+          {:indexed-by [edge] :fixed true
+           :value ;; intial diversity is super-optimistic
+           (fn [e]
+             (let [ [ [_ fwd] [_ bwd] ] (-> arc-map (get e) :bounds :count)]
+               [e (diversity (max fwd bwd))]))}
+          
+          :SUPPLY-DIVERSITY
+          {:indexed-by [svtx] :fixed true :value initial-supply-diversity}
+          
+          :LOSS-KW
+          {:indexed-by [edge] :fixed true
+           :value
+           (fn [e]
+             (let [[[min-fwd _] [min-back _]] (-> (get arc-map e) :bounds :mean)
+                   min-fwd  (or min-fwd 0)
+                   min-back (or min-back 0)
+                   min-flow (min min-fwd min-back)
+                   kwp (if (zero? min-flow) (max min-fwd min-back) min-flow)]
+               [e (edge-loss-kw-for-kwp e kwp)]))}
 
+          ;; VARIABLES
+          
           :DVIN {:type :binary :indexed-by [dvtx]
                  :value demand-is-required
                  :fixed demand-is-required}
@@ -285,8 +355,11 @@
           :AIN  {:type :binary :indexed-by [arcs]}
           :SVIN {:type :binary :indexed-by [svtx]}
 
-          :FLOW-KW {:type :non-negative :indexed-by [arc period]}
-          :EDGE-CAP-KW {:type :non-negative :indexed-by [edge]}
+          :ARC-FLOW-KW {:type :non-negative :indexed-by [arc period]
+                        :upper flow-upper-bound}
+          
+          :EDGE-CAP-KW {:type :non-negative :indexed-by [edge]
+                        :upper edge-max-flow}
           :SUPPLY-CAP-KW {:type :non-negative :indexed-by [svtx]}
           :SUPPLY-KW {:type :non-negative :indexed-by [svtx]}}
 
@@ -306,7 +379,7 @@
 
        (not-empty ins-types)
        (merge
-        ;; TODO restrict indices to valid combinations
+        ;; TODO restrict indices to valid combinations, since I can now
         {:INSULATION-KWH {:type :non-negative :indexed-by [dvtx ins-types]
                           :lower insulation-min-kwh
                           :upper insulation-max-kwh}
@@ -315,29 +388,264 @@
                          :fixed (fn [i it] (when-not (insulation-allowed i it) true))}
          }
         ))
+
+     ;; OTHER JUNK, for use elsewhere.
+     ::edges   edge
+     ::edge-loss edge-loss-kw-for-kwp
+     ::diversity diversity
+     ::arc     arc
+     ::svtx    svtx
+     ::dvtx    dvtx
+     ::arc-map arc-map
+     ::vtx-map vertices
      }))
 
-(defn- compute-edge-diversity
-  "Return a map {[i j] => diversity}"
-  [mip])
+(defn- postorder [children root]
+  (let [walk (fn walk [visited from node]
+               (if (visited node)
+                 [[::loop node]]
+                 (concat
+                  (mapcat (partial walk (conj visited node) node)
+                          (children node))
+                  [[::node node]]
+                  (when from [[::edge from node]])
+                  )))]
+    (walk #{} nil root)))
 
-(defn- compute-supply-diversity
-  "Return a map {i => diversity}."
+(defn- count-up [root children f r]
+  (reduce
+   (fn [acc item]
+     (case (first item)
+       ::edge (assoc acc (vec (rest item)) (get acc (nth item 2)))
+       ::loop acc
+       ::node (let [x (second item)]
+                (assoc acc x
+                       (reduce r (cons (f x) (for [c (children x)] (get acc c 0))))))))
+   {} (postorder children root)))
 
-  [mip])
+(defn- truthy [v] (or (= true v) (and (number? v) (> v 0.5))))
 
-(defn- compute-edge-losses
-  "Return a map {[i j] => losses-kw}"
-  [mip])
+(defn- diversity-factor
+  ([rate limit n]
+   (/ (Math/round
+       (* 100.0 (+ limit (/ (- 1.0 limit) (max 1.0 (* n rate))))))
+      100.0))
+  ([problem]
+   (let [rate  (:diversity-rate problem 1.0)
+         limit (:diversity-limit problem 0.62)]
+     (fn [n] (diversity-factor rate limit n)))))
 
-(defn parameterise
+(defn- compute-parameters
+  "The mip has been solved, so we can figure out the diversity & heat
+  loss parameters for the solution."
+  [mip]
+  (let [diversity-factor (::diversity mip) ; Get hold of diversity function
+
+        ;; Find which arcs went into the solution
+        arcs-in (-> mip :vars :AIN :value
+                    (->> (keep (fn [[a v]] (when (truthy v) a)))))
+
+        ;; Transform to adjacency matrix
+        adj     (reduce
+                 (fn [acc [i j]] (update acc i conj j))
+                 {}
+                 arcs-in)
+
+        ;; Find which supplies we used
+        roots   (-> mip :vars :SVIN :value
+                    (->> (keep (fn [[i v]] (when (truthy v) i)))))
+
+        max-0 #(max (or %1 0) (or %2 0))
+
+        vtx-map (::vtx-map mip)
+        
+        edge-counts                   ; the number of places
+                                        ; reachable through each edge
+        (apply merge-with max-0
+               (for [s roots] (count-up s adj #(-> vtx-map (get %) (:count 1)) +)))
+        
+        edge-max-peak-flow            ; the largest individual peak
+                                        ; demand through each edge
+        (apply merge-with max-0
+               (for [s roots] (count-up s adj #(-> vtx-map (get %) :demand (:kwp 0)) max)))
+
+        flow-kw (-> lp :vars :ARC-FLOW-KW :value)
+        edge-loss-kw (::edge-loss mip) ;; a function, worked out before
+        
+        edge-parameters                 ; For edges, losses &
+                                        ; diversity worked out
+                                        ; together
+        (->>
+         (for [e (::edge lp)]
+           (let [count-a (edge-counts e 0)
+                 count-b (edge-counts (invert e) 0)
+
+                 max-peak-a (edge-max-peak-flow e 0)
+                 max-peak-b (edge-max-peak-flow (invert e) 0)
+
+                 count    (or count-a count-b)
+                 max-peak (or max-peak-a max-peak-b)
+
+                 diversity (diversity-factor count)
+                 undiversified-flow (max
+                                     (get flow-kw [e :peak])
+                                     (get flow-kw [(invert e) :peak]))
+
+                 diversified-flow (* diversity undiversified-flow)
+                 
+                 diversity              ; This fixes a mistake where
+                                        ; we diversify a pipe to carry
+                                        ; less than the biggest load
+                                        ; below it, which makes no
+                                        ; sense
+                 (if (and (> max-peak diversified-flow)
+                          (pos? undiversified-flow))
+                   (/ max-peak undiversified-flow)
+                   diversity)
+
+                 diversified-flow (* diversity undiversified-flow)
+
+                 heat-loss (edge-loss-kw e diversified-flow)
+                 ]
+             
+             [e [diversity heat-loss]]))
+         (into {}))
+        ]
+    {:edge-diversity    (into {} (for [[e [d]] edge-parameters] [e d]))
+     :edge-losses       (into {} (for [[e [_ l]] edge-parameters] [e l]))
+     :supply-diversity  (into {} (for [s (::svtx lp)] [s (diversity-factor (edge-counts s 0.0))]))
+     }))
+
+(defn- parameterise
   "Given a MIP from construct-mip above (which may have a solution on it)
   Compute and install the values for :EDGE-DIVERSITY :SUPPLY-DIVERSITY and :LOSS-KW
   which are not determined within the program. "
 
   [mip]
-  (update mip :vars
-          #(-> %
-               (assoc-in [:EDGE-DIVERSITY :value]   (compute-edge-diversity mip))
-               (assoc-in [:SUPPLY-DIVERSITY :value] (compute-supply-diversity mip))
-               (assoc-in [:LOSS-KW :value]          (compute-edge-losses mip)))))
+  (if (:solution mip)
+    (let [{& :keys [edge-losses edge-diversity supply-diversity]} (compute-parameters mip)]
+      (s/multi-transform
+       [:vars
+        (s/multi-path
+         [:EDGE-DIVERSITY   :value (s/terminal-val edge-diversity)]
+         [:SUPPLY-DIVERSITY :value (s/terminal-val supply-diversity)]
+         [:LOSS-KW          :value (s/terminal-val edge-losses)])]))
+
+    mip ;; if no solution, stick with initial parameters
+    ))
+
+(let [fix-decision (fn [var]
+                     (assoc var
+                            :fixed true
+                            ::was-fixed (:fixed var)))
+      unfix-decision (fn [var]
+                       (-> var
+                           (assoc :fixed (::was-fixed var))
+                           (dissoc ::was-fixed)))
+      ]
+
+  (defn- fix-decisions [mip]
+    (s/multi-transform
+     [:vars
+      (s/multi-path
+       [:AIN (s/terminal fix-decision)]
+       [:DVIN (s/terminal fix-decision)]
+       [:SVIN (s/terminal fix-decision)]
+       [:INSULATION-IN (s/terminal fix-decision)]
+       [:INSULATION-KWH (s/terminal fix-decision)]
+       [:ALT-IN (s/terminal fix-decision)])]
+     mip))
+  
+  (defn- fix-decisions [mip]
+    (s/multi-transform
+     [:vars
+      (s/multi-path
+       [:AIN (s/terminal unfix-decision)]
+       [:DVIN (s/terminal unfix-decision)]
+       [:SVIN (s/terminal unfix-decision)]
+       [:INSULATION-IN (s/terminal unfix-decision)]
+       [:INSULATION-KWH (s/terminal unfix-decision)]
+       [:ALT-IN (s/terminal unfix-decision)])]
+     mip)))
+
+(defn- summary-decisions [mip]
+  (let [vars (:vars mip)]
+    (vec (for [k [:AIN :DVIN :SVIN :INSULATION-IN :INSULATION-KWH :ALT-IN]]
+           (-> vars (get k) :value)))))
+
+(defn- summary-parameters [mip]
+  ;; edge diversity, supply diversity to 2dp, edge loss to nearest kw
+  (let [ed (-> mip :vars :EDGE-DIVERSITY :value)
+        el (-> mip :vars :LOSS-KW :value)
+        sd (-> mip :vars :SUPPLY-DIVERSITY :value)
+        r #(/ (Math/round (* 100.0 (or % 0))) 100.0)
+        ]
+    [(for [e (::edge mip)]
+       [e [(r (ed e)) (Math/round (el e))]])
+     (for [s (::svtx mip)]
+       [s (r (sd s))])]))
+
+(defn- solve [mip & {:keys [mip-gap time-limit]}]
+  (let [sol-free (scip/solve mip)
+        sol-fix  (-> sol-free (parameterise) ;; reparameterise
+                     (fix-decisions) (scip/solve) (unfix-decisions))
+
+        stable
+        (= (summary-parameters sol-free)
+           (summary-parameters sol-fix))
+        ]
+    
+    ;; Copy the gap & bounds from the free solution, as there's no gap
+    ;; or bounds for the fixed one as we have fixed it.
+    (s/multi-transform
+     [:solution
+      (s/multi-path
+       [:stable (s/terminal-val stable)]
+       [:gap    (s/terminal-val (-> sol-free :solution :gap))]
+       [:bounds (s/terminal-val (-> sol-free :solution :bounds))]
+       )]
+     sol-fix)))
+
+(defn run-model [problem]
+  (let [mip (construct-mip problem)
+        iteration-limit (:iteration-limit problem 100000)
+        time-limit (:time-limit problem 1.0)
+        mip-gap    (:mip-gap problem 0.05)
+
+        end-time (+ (* time-limit 1000 3600)
+                    (System/currentTimeMillis))
+
+        most-negative (- Double/MAX_VALUE)
+        ]
+    
+    (loop [mip   mip ;; comes parameterised out of the gate
+           seen  #{} ;; decision sets we have already seen
+           iters 0   ;; number of tries
+           best  nil ;; best so far
+           ]
+      (let [solved-mip (solve mip
+                              :mip-gap mip-gap
+                              :time-limit
+                              (max 60 (/ (- end-time (System/currentTimeMillis)) 1000.0)))
+            
+            decisions  (summary-decisions solved-mip)
+            
+            best       (if (> (-> solved-mip :solution (:objective most-negative))
+                              (-> best       :solution (:objective most-negative)))
+                         solved-mip (or best solved-mip))
+
+            is-stable  (:stable (:solution solved-mip))
+            has-looped (contains? seen decisions)
+            out-of-iters (> iteration-limit iters)
+            out-of-time (> (System/currentTimeMillis) end-time)
+            ]
+
+        (when is-stable    (println "Solution is stable"))
+        (when has-looped   (println "Solution is looping"))
+        (when out-of-iters (println "Iteration limit reached"))
+        (when out-of-time  (println "Time limit reached"))
+        
+        (if (or has-looped out-of-iters out-of-time is-stable)
+          best
+          (recur solved-mip (conj seen decisions) (inc iters) best)
+          )))))
