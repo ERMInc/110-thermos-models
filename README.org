@@ -1,0 +1,4 @@
+#+TITLE: THERMOS models
+
+This repository contains the clojure definition for the two THERMOS optimisation models.
+Some modelling components still live in the UI part - it might be nice to move these into here.
