@@ -3,18 +3,18 @@
   (:require [lp.scip :as scip]
             [com.rpl.specter :as s]))
 
-(defn- edge
+(defn- as-edge
   ([i j] (if (< i j) [i j] [j i]))
-  ([[i j]] (edge i j)))
+  ([[i j]] (as-edge i j)))
 
-(defn- invert [e] [(second e) (first e)])
+(defn- rev-edge [e] [(second e) (first e)])
 
 (defn construct-mip [problem]
   (let [;; indexing sets
         vtx        (set (map :id (:vertices problem)))
-        edges      (set (for [e (:edges problem)] (edge (:i e) (:j e))))
-        
-        arcs       (set (concat edges (map (comp vec reverse) edges)))
+        edge       (set (for [e (:edges problem)] (as-edge (:i e) (:j e))))
+
+        arc        (into edge (map invert edge))
         
         svtx       (set (map :id (filter :supply (:vertices problem))))
         dvtx       (set (map :id (filter :demand (:vertices problem))))
@@ -68,8 +68,8 @@
         vertex-value-per-kwp (fn [i] (or (-> (vertices i) :demand :value-per-kwp) 0))
         vertex-value-per-kwh (fn [i] (or (-> (vertices i) :demand :value-per-kwh) 0))
         
-        neighbours (for [[i ijs] (group-by first arcs)]
-                     [i (set (map second ijs))])
+        neighbours (into {} (for [[i ijs] (group-by first arc)]
+                              [i (set (map second ijs))]))
         
         supply-count-max         (:supply-limit problem)
 
@@ -124,7 +124,7 @@
                 flow-out [+ (for [j neighbours] [:ARC-FLOW-KW [i j] t])]
 
                 losses   (if (= :mean period)
-                           [+ (for [j neighbours] [* [:LOSS-KW (edge i j)] [:AIN [j i]]])]
+                           [+ (for [j neighbours] [* [:LOSS-KW (as-edge i j)] [:AIN [j i]]])]
                            0)
 
                 demand (demand-kw i t)
@@ -207,7 +207,7 @@
         max-loss-kw
         (reduce
          +
-         (for [e edge]
+         (for [e edges]
            (let [[[_ max-fwd] [_ max-back]]
                  (-> (get arc-map e) :bounds :peak)
                  max-fwd (or max-fwd 0)
@@ -275,11 +275,11 @@
       (for [a arc]
         [:and
          ;; Arcs carry their losses
-         [>= [:ARC-FLOW-KW a :mean] [* [:AIN a] [:LOSS-KW (edge a)]]]
+         [>= [:ARC-FLOW-KW a :mean] [* [:AIN a] [:LOSS-KW (as-edge a)]]]
          ;; Edges have capacity for peak flow
-         [>= [:EDGE-CAP-KW (edge a)] [* [:ARC-FLOW-KW a :peak] [:EDGE-DIVERSITY e]]]
+         [>= [:EDGE-CAP-KW (as-edge a)] [* [:ARC-FLOW-KW a :peak] [:EDGE-DIVERSITY e]]]
          ;; Edges have capacity for mean flow
-         [>= [:EDGE-CAP-KW (edge a)] [:ARC-FLOW-KW a :mean]]])
+         [>= [:EDGE-CAP-KW (as-edge a)] [:ARC-FLOW-KW a :mean]]])
       
       ;; supply capacity sufficient
       (for [i svtx]
@@ -352,7 +352,7 @@
                  :value demand-is-required
                  :fixed demand-is-required}
           
-          :AIN  {:type :binary :indexed-by [arcs]}
+          :AIN  {:type :binary :indexed-by [arc]}
           :SVIN {:type :binary :indexed-by [svtx]}
 
           :ARC-FLOW-KW {:type :non-negative :indexed-by [arc period]
@@ -390,7 +390,7 @@
         ))
 
      ;; OTHER JUNK, for use elsewhere.
-     ::edges   edge
+     ::edge    edge
      ::edge-loss edge-loss-kw-for-kwp
      ::diversity diversity
      ::arc     arc
