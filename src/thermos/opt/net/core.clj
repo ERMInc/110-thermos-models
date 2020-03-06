@@ -586,7 +586,7 @@
        [s (r (sd s))])]))
 
 (defn- solve [mip & {:keys [mip-gap time-limit]}]
-  (let [sol-free (scip/solve mip)
+  (let [sol-free (scip/solve mip :time-limit time-limit :mip-gap mip-gap)
         sol-fix  (-> sol-free (parameterise) ;; reparameterise
                      (fix-decisions) (scip/solve) (unfix-decisions))
 
