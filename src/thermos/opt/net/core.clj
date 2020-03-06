@@ -14,7 +14,7 @@
         vtx        (set (map :id (:vertices problem)))
         edge       (set (for [e (:edges problem)] (as-edge (:i e) (:j e))))
 
-        arc        (into edge (map invert edge))
+        arc        (into edge (map rev-edge edge))
         
         svtx       (set (map :id (filter :supply (:vertices problem))))
         dvtx       (set (map :id (filter :demand (:vertices problem))))
@@ -478,10 +478,10 @@
         (->>
          (for [e (::edge lp)]
            (let [count-a (edge-counts e 0)
-                 count-b (edge-counts (invert e) 0)
+                 count-b (edge-counts (rev-edge e) 0)
 
                  max-peak-a (edge-max-peak-flow e 0)
-                 max-peak-b (edge-max-peak-flow (invert e) 0)
+                 max-peak-b (edge-max-peak-flow (rev-edge e) 0)
 
                  count    (or count-a count-b)
                  max-peak (or max-peak-a max-peak-b)
@@ -489,7 +489,7 @@
                  diversity (diversity-factor count)
                  undiversified-flow (max
                                      (get flow-kw [e :peak])
-                                     (get flow-kw [(invert e) :peak]))
+                                     (get flow-kw [(rev-edge e) :peak]))
 
                  diversified-flow (* diversity undiversified-flow)
                  
