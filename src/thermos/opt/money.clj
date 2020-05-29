@@ -22,4 +22,10 @@
      (zero? r) (* p x)
      true      (pv-sequence (repeat x) r p))))
 
-
+(defn periodic-sequence
+  "Generate a periodic sequence of £x every i years (and so on for other xis)"
+  [x i & xis]
+  (apply map +
+         (cycle (conj (repeat (dec i) 0) x))
+         (for [[x i] (partition-all 2 xis)]
+           (cycle (conj (repeat (dec i) 0) x)))))
