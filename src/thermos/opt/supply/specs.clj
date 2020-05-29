@@ -3,54 +3,64 @@
   (:require [spec-tools.data-spec :as ds]
             [clojure.spec.alpha :as s]))
 
-(def cost-spec (ds/spec {:fixed double? :per-kwh double? :per-kwp double?}))
+(def cost-spec (ds/spec {:fixed number? :per-kwh number? :per-kwp number?}))
+
+(def ^:private not-nil? (complement nil?))
 
 (def supply-problem
-  (ds/spec
-   ::supply-problem
-   {:curtailment-cost double?
-    :can-dump-heat boolean?
+  (let [time-series [number?]]
+    (ds/spec
+     ::supply-problem
+     {:curtailment-cost number?
+      :can-dump-heat    boolean?
 
-    :discount-rate double?
-    :accounting-period pos-int?
-    
-    :profile
-    {any? ;; day name
-     {:frequency pos-int?
-      :heat-demand [double?]
-      :grid-offer  [double?] ;; electricity offer
-      :fuel
-      {keyword?
-       {:price [double?]
-        :co2   [double?]
-        :pm25  [double?]
-        :nox   [double?]}}}}
+      :discount-rate     number?
+      :accounting-period pos-int?
 
-    :plant-options
-    {any?
-     {:capital-cost cost-spec
-      :operating-cost cost-spec
-      :lifetime pos-int?
-      :fuel any?
-      :chp boolean?
-      :capacity-kwp double?
-      :power-efficiency (ds/maybe double?)
-      :heat-efficiency double?
-      :substation (ds/maybe any?)
-      }}
+      :co2-price  number?
+      :nox-price  number?
+      :pm25-price number?
+      
+      :profile
+      {not-nil? ;; day name
+       {:frequency   pos-int?
+        :divisions   pos-int?
+        :heat-demand time-series
+        :grid-offer  time-series ;; electricity offer
+        :fuel
+        {not-nil?
+         {:price time-series
+          :co2   time-series
+          :pm25  time-series
+          :nox   time-series}}}}
 
-    :storage-options
-    {any?
-     {:capital-cost cost-spec
-      :efficiency double?
-      :lifetime pos-int?
-      :capacity-kwh double?}
-     }
+      :plant-options
+      {not-nil?
+       {:capital-cost     cost-spec
+        :operating-cost   cost-spec
+        :lifetime         pos-int?
+        :fuel             not-nil?
+        :chp              boolean?
+        :capacity-kwp     number?
+        :power-efficiency (ds/maybe number?)
+        :heat-efficiency  number?
+        :substation       (ds/maybe any?)
+        }}
 
-    :substations
-    {any?
-     {:headroom-kwp double? :alpha double?}
-     }}))
+      :storage-options
+      {not-nil?
+       {:capital-cost cost-spec
+        :efficiency   number?
+        :lifetime     pos-int?
+        :capacity-kwh number? ;; storage capacity
+        :capacity-kwp number? ;; maximum flow rate
+        }
+       }
+
+      :substations
+      {not-nil?
+       {:headroom-kwp number? :alpha number?}
+       }})))
 
 
 
