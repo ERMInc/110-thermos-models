@@ -16,7 +16,7 @@
 (>defn profile-area ^double [profile]
   [::values-profile => double?]
   (reduce + (for [day profile]
-              (let [slice-size (/ 1.0 (count (:values day)))]
+              (let [slice-size (/ (count (:values day)))]
                 (* slice-size
                    (double (:frequency day 1.0))
                    (reduce + 0.0 (:values day)))))))
@@ -60,6 +60,7 @@
    => ::values-profile | #(and (near= (profile-peak %) target-peak)
                                (near= (profile-area %) target-area))
    ]
+
   ;; Marko's hack is to say norm(curve)^α; solve for α s.t. area is whatever it needs to be
   (let [normalized   (norm-profile profile)
         normed-target-auc (/ target-area target-peak)]
@@ -90,14 +91,26 @@
           )))))
 
 (defn combine-buildings
-  [day-types ;; {day type => frequency}
+  [day-types ;; {day type => {:frequency frequency}}
    profiles  ;; {profile => {day type => values}}
    demands   ;; [{:profile p :kwh a :kwp p}]
    target-kwh target-peak]
+
+  {:pre [(map? day-types)
+         (every? int? (map :frequency (vals day-types)))
+         (every? (set (keys profiles)) (map :profile demands))
+         (every? double? (map :kwh demands))
+         (every? double? (map :kwp demands))
+         (every? (fn [[p d]]
+                   (= (:divisions (day-types d))
+                      (count (get (profiles p) d))))
+                 (for [p (keys profiles) d (keys day-types)] [p d]))
+         
+         ]}
+
   (let [;; this assumes profiles are heterogenous
-        day-type-length (->> (for [[t v] (second (first profiles))]
-                               [t (count v)])
-                             (into {}))
+        day-type-length (into {} (for [[k {d :divisions}] day-types]
+                                   [k d]))
         
         day-type-order (sort (keys day-types))
         zero           (for [d day-type-order]
@@ -108,7 +121,7 @@
          (fn [acc {pr :profile kwh :kwh kwp :kwp}]
            (let [profile (get profiles pr)
                  profile (-> (for [d day-type-order]
-                               {:frequency (get day-types d 1.0)
+                               {:frequency (:frequency (get day-types d 1.0))
                                 :values    (get profile d)})
                              (scale-to-fit (/ kwh 24.0) kwp))]
              (map
@@ -120,7 +133,7 @@
         combined-profile
         (-> (map (fn [d vs]
                    {:day-type d
-                    :frequency (get day-types d 1.0)
+                    :frequency (:frequency (get day-types d 1.0))
                     :values vs})
                  day-type-order combined-profile)
             (scale-to-fit (/ target-kwh 24.0) target-peak)
@@ -129,31 +142,4 @@
     combined-profile))
 
 
-(defn create-input-profile
-  "Our profile is stored in a different format for presentation, so we
-  need to do the mangling to make it have the right peak, and then we
-  need to reassemble it into a single input profile of the sort that
-  goes in a supply problem.
-  "
-  [profile buildings target-demand target-peak]
-  (let [day-types     (:day-types profile)
-        heat-profiles (:heat-profiles profile)
-
-        system-profile (combine-buildings
-                        (:day-types profile)
-                        (:heat-profiles profile)
-                        buildings ;; somewhere we need to transform
-                        ;; from namespaced keywords
-                        target-demand target-peak)]
-    (->> (for [[day frequency] day-types]
-           [day
-            {:frequency frequency
-             :heat-demand (:values (get system-profile day))
-             :grid-offer  (get (:grid-offer profile) day)
-             :fuel
-             (->> (for [[fuel prices] (:fuel-prices profile)]
-                    [fuel (merge {:price (get prices day)}
-                                 (-> profile :emissions-factors (get fuel) (get day)))])
-                  (into {}))}])
-         (into {}))))
 
