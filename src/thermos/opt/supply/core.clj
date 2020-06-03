@@ -229,10 +229,16 @@
        (merge
         {:BUILD-STORE    {:type :binary       :indexed-by [store-types]}
          :STORE-COST     {:type :non-negative :indexed-by [store-types]}
-         :STORE-SIZE-KWH {:type :non-negative :indexed-by [store-types]}
-         :STORE-SIZE-KWP {:type :non-negative :indexed-by [store-types]}
-         :FLOW-IN-KW     {:type :non-negative :indexed-by [store-types time-slices]}
-         :FLOW-OUT-KW    {:type :non-negative :indexed-by [store-types time-slices]}
+         :STORE-SIZE-KWH {:type :non-negative :indexed-by [store-types]
+                          :upper store-max-capacity}
+         :STORE-SIZE-KWP {:type :non-negative :indexed-by [store-types]
+                          :upper store-max-flow}
+         
+         :FLOW-IN-KW     {:type :non-negative :indexed-by [store-types time-slices]
+                          :upper (fn [s _] (store-max-flow s))}
+         
+         :FLOW-OUT-KW    {:type :non-negative :indexed-by [store-types time-slices]
+                          :upper (fn [s _] (store-max-flow s))}
          :CHARGE-KWH     {:type :non-negative :indexed-by [store-types time-slices]}}))
 
      :minimize
@@ -267,12 +273,6 @@
          [:CHARGE-KWH s t]
          [:+ [:CHARGE-KWH s (previous-time-slice t)]
           [* h [- [:FLOW-IN-KW s t] [:FLOW-OUT-KW s t]]]]])
-
-      ;; storage flow bounds
-      (for [s store-types t time-slices]
-        [:and
-         [:<= [:FLOW-IN-KW s t]  (store-max-flow s)]
-         [:<= [:FLOW-OUT-KW s t] (store-max-flow s)]])
       
       ;; substation power balance constraints
       (for [s substation-ids t time-slices]
