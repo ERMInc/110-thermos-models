@@ -2,7 +2,9 @@
   "Thermos network optimisation model. Translated from the python version."
   (:require [lp.scip :as scip]
             [com.rpl.specter :as s]
-            [lp.core :as lp]))
+            [lp.core :as lp]
+            [clojure.tools.logging :as log]
+            [clojure.java.io :as io]))
 
 (def ^:const hours-per-year (* 24.0 365))
 
@@ -14,7 +16,7 @@
 
 (defn- rev-edge [e] [(second e) (first e)])
 
-(defn- assoc-by [f s]
+(defn assoc-by [f s]
   (reduce #(assoc %1 (f %2) %2)  {} s))
 
 (defn- interpolate [xs ys]
@@ -95,10 +97,7 @@
         demand-is-required
         (fn [i] (boolean (-> vertices (get i) :demand :required)))
 
-        demand-kw  (fn [i t]
-                     (if (= :mean t)
-                       (/ (demand-kwh i) hours-per-year)
-                       (demand-kwp i)))
+        
 
         edge-fixed-cost
         (fn [e] (let [e (get arc-map e)]
@@ -122,6 +121,10 @@
         vertex-value-per-kwh (fn [i] (or (-> (vertices i) :demand (get "value/kwh")) 0))
         vertex-alternatives  (fn [i]
                                (-> (vertices i) :demand :alternatives keys set))
+
+        vertex-demand-count  (fn [i] (if (dvtx i)
+                                       (-> (vertices i) :demand (:count 1))
+                                       0))
         
         neighbours (into {} (for [[i ijs] (group-by first arc)]
                               [i (set (map second ijs))]))
@@ -171,25 +174,42 @@
              [-
               [* [:ALT-IN i a] (demand-kwh i) f]
               [* [:ALT-AVOIDED-KWH i a] f]])])
+
+        diversity (diversity-factor problem)
         
         unmet-demand
-        (fn [i t]
-          (let [neighbours (neighbours i)
-                flow-in  [:+ (for [j neighbours] [:ARC-FLOW-KW [j i] t])]
-                flow-out [:+ (for [j neighbours] [:ARC-FLOW-KW [i j] t])]
+        (let [demand-kw  (fn [i t]
+                           (if (= :mean t)
+                             (/ (demand-kwh i) hours-per-year)
 
-                losses   (if (= :mean t)
-                           [:+ (for [j neighbours]
-                                 [:* [:LOSS-KW (as-edge i j)] [:AIN [j i]]])]
-                           0)
+                             ;; The reason for the ratio below is that an individual building can contain many addresses
+                             ;; but the demand recorded for it is the actual peak (connection size required).
+                             ;; Since we will later apply a diversity factor to all pipes according to their counts
+                             ;; we must first take the factor off here so when we put it back on later all is well.
+                             ;; This is done here instead of as a preprocessing step because we only want to do it for
+                             ;; networks - for individual systems we want the diversified value.
 
-                demand (if (contains? dvtx i)
-                         [:* [:DVIN i] (demand-kw i t)]
-                         0.0)
+                             ;; Since we only want this happening in here, demand-kw is closed over by unmet-demand
+                             (/ (demand-kwp i)
+                                (diversity (vertex-demand-count i)))))
+              ]
+          (fn [i t]
+            (let [neighbours (neighbours i)
+                  flow-in  [:+ (for [j neighbours] [:ARC-FLOW-KW [j i] t])]
+                  flow-out [:+ (for [j neighbours] [:ARC-FLOW-KW [i j] t])]
 
-                supply (if (contains? svtx i) [:SUPPLY-KW i t] 0)
-                ]
-            [:- [:+ demand flow-out losses] [:+ supply flow-in]]))
+                  losses   (if (= :mean t)
+                             [:+ (for [j neighbours]
+                                   [:* [:LOSS-KW (as-edge i j)] [:AIN [j i]]])]
+                             0)
+
+                  demand (if (contains? dvtx i)
+                           [:* [:DVIN i] (demand-kw i t)]
+                           0.0)
+
+                  supply (if (contains? svtx i) [:SUPPLY-KW i t] 0)
+                  ]
+              [:- [:+ demand flow-out losses] [:+ supply flow-in]])))
 
         total-connection-value
         [+ (for [i dvtx]
@@ -312,9 +332,9 @@
                              (if (zero? arc-bound) 0
                                  (* flow-bound-slack (+ arc-bound max-loss-kw)))))
 
-        diversity (diversity-factor problem)
+        
 
-        total-count (reduce + (map #(:count % 1) (:vertices problem)))
+        total-count (reduce + (map #(:count (:demand %) 1) (filter :demand (:vertices problem))))
         
         initial-supply-diversity (diversity total-count)
         ]
@@ -582,7 +602,8 @@
                                         ; reachable through each edge
         (apply merge-with max-0
                (for [s roots] (count-up s adj #(if (dvin? %)
-                                                 (-> vtx-map (get %) (:count 1)) 0) +)))
+                                                 (-> vtx-map (get %) :demand (:count 1)) 0) +)))
+
         edge-max-peak-flow            ; the largest individual peak
                                         ; demand through each edge
         (apply merge-with max-0
@@ -710,7 +731,10 @@
          [s (r (sd s))])])))
 
 (defn- solve [mip & {:keys [mip-gap time-limit]}]
-  (let [sol-free (scip/solve mip :time-limit time-limit :mip-gap mip-gap)
+  (let [sol-free (scip/solve mip :time-limit time-limit :mip-gap mip-gap
+                             "numerics/episilon" "1e-03"
+                             "numerics/feastol"  "1e-03")
+        
         sol-fix  (-> sol-free
                      (parameterise) ;; reparameterise
                      (fix-decisions)
@@ -725,8 +749,9 @@
 
         stable
         (= (summary-parameters sol-free)
-           (summary-parameters sol-fix))
-        ]
+           (summary-parameters sol-fix))]
+    
+    
 
     ;; Copy solution information from the free version, except /value/
     ;; which is more true in the fixed one.
@@ -743,7 +768,7 @@
     (let [edge           (::edge s)
           alt-types      (::alt-types s)
           ins-types      (::ins-types s)
-          vtx            (concat (::svtx s) (::dvtx s))
+          vtx            (into (::svtx s) (::dvtx s))
           ain            (-> vars :AIN :value)
           edge-capacity  (-> vars :EDGE-CAP-KW :value)
           edge-losses    (-> vars :LOSS-KW :value)
@@ -763,7 +788,7 @@
                             (some #(get alternative [i %]) alt-types))
           ]
       
-      
+      (log/info "Summarising results")
       {:edges
        (for [e edge :when (or (ain e) (ain (rev-edge e)))]
          {:i           (first e)
@@ -807,7 +832,9 @@
   )
 
 (defn run-model [problem]
+  (log/info "Solving network problem")
   (let [mip (construct-mip problem)
+        _ (log/info "Constructed MIP")
         iteration-limit (:iteration-limit problem 100000)
         time-limit (:time-limit problem 1.0)
         mip-gap    (:mip-gap problem 0.05)
@@ -841,14 +868,14 @@
             out-of-time (> (System/currentTimeMillis) end-time)
             ]
 
-        (println "Iteration" iters "of" iteration-limit
-                 "remaining time" (/ (- end-time (System/currentTimeMillis)) 1000.0)
-                 "Solution" (dissoc (:solution solved-mip) :log))
+        (log/info "Iteration" iters "of" iteration-limit
+                  "remaining time" (/ (- end-time (System/currentTimeMillis)) 1000.0)
+                  "Solution" (dissoc (:solution solved-mip) :log))
         
-        (when is-stable    (println "Solution is stable"))
-        (when has-looped   (println "Solution is looping"))
-        (when out-of-iters (println "Iteration limit reached"))
-        (when out-of-time  (println "Time limit reached"))
+        (when is-stable    (log/info "Solution is stable"))
+        (when has-looped   (log/info "Solution is looping"))
+        (when out-of-iters (log/info "Iteration limit reached"))
+        (when out-of-time  (log/info "Time limit reached"))
         
         (if (or has-looped out-of-iters out-of-time is-stable)
           (output-solution problem best iters obj-vals)
@@ -856,3 +883,16 @@
                  (conj obj-vals (:value (:solution solved-mip)))
                  best)
           )))))
+
+
+(comment
+  (def problem (with-open [r (java.io.PushbackReader. (io/reader "/home/hinton/tmp/problem.edn"))]
+                 (binding [*read-eval* false]
+
+                   (read r))
+                 ))
+
+
+  (def soln (run-model problem))
+
+  )
