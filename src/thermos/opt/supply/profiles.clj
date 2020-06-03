@@ -99,8 +99,8 @@
   {:pre [(map? day-types)
          (every? int? (map :frequency (vals day-types)))
          (every? (set (keys profiles)) (map :profile demands))
-         (every? double? (map :kwh demands))
-         (every? double? (map :kwp demands))
+         (every? number? (map :kwh demands))
+         (every? number? (map :kwp demands))
          (every? (fn [[p d]]
                    (= (:divisions (day-types d))
                       (count (get (profiles p) d))))
