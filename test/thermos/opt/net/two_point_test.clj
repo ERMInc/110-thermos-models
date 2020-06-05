@@ -37,9 +37,8 @@
   4306/2 => 2153 per building
   "  
   (:require [thermos.opt.net.core :as sut]
+            [thermos.opt.test :refer [≈]]
             [clojure.test :as t]))
-
-(defn- ≅ [a b] (< (Math/abs (- a b)) 0.001))
 
 (def problem
   {:pipe-losses {:kwp [30], "w/m" [1]}
@@ -162,7 +161,7 @@
     (t/is (== 1876 (int (:output-kwh (vertices "b")))))
 
     (t/is (== 24 (int (:capacity-kw b->j))))
-    (t/is (≅ 0.81 (:diversity b->j)))))
+    (t/is (≈ 0.81 (:diversity b->j)))))
 
 
 

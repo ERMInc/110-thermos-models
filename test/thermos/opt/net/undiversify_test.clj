@@ -12,12 +12,8 @@
     less diversification
   "
   (:require  [clojure.test :as t]
+             [thermos.opt.test :refer [≈]]
              [thermos.opt.net.core :as net]))
-
-(defn- ≈
-  ([a b]   (≈ a b 0.001))
-  ([a b ε] (< (Math/abs (- a b)) ε)))
-
 
 (t/deftest undiversify
   (let [problem
@@ -66,8 +62,7 @@
 
     (t/is (≈ 0.81 (:diversity (edges ["B" "J"]))))
     (t/is (≈ 0.81 (:diversity (edges ["A" "J"]))))
-
-    (t/is (≈ 0.72 (:diversity (edges ["J" "S"]))) 0.1)
+    (t/is (≈ 0.72 (:diversity (edges ["J" "S"])) 0.1))
     
     ))
 
