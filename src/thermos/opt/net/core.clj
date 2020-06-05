@@ -101,11 +101,11 @@
 
         edge-fixed-cost
         (fn [e] (let [e (get arc-map e)]
-                  (if e (* (:length e 0) (get e "cost/m")) 0)))
+                  (if e (* (:length e 0) (get e "cost/m" 0)) 0)))
 
         edge-cost-per-kwp
         (fn [e] (let [e (get arc-map e)]
-                  (if e (* (:length e 0) (get e "cost/kwm")) 0)))
+                  (if e (* (:length e 0) (get e "cost/kwm" 0)) 0)))
 
         supply-max-capacity (fn [i] (or (-> (vertices i) :supply :capacity-kw) 0))
         supply-fixed-cost   (fn [i] (or (-> (vertices i) :supply :cost) 0))
