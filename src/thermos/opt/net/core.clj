@@ -101,24 +101,24 @@
 
         edge-fixed-cost
         (fn [e] (let [e (get arc-map e)]
-                  (if e (* (:length e 0) (get e "cost/m" 0)) 0)))
+                  (if e (* (:length e 0) (get e :cost%m 0)) 0)))
 
         edge-cost-per-kwp
         (fn [e] (let [e (get arc-map e)]
-                  (if e (* (:length e 0) (get e "cost/kwm" 0)) 0)))
+                  (if e (* (:length e 0) (get e :cost%m 0)) 0)))
 
         supply-max-capacity (fn [i] (or (-> (vertices i) :supply :capacity-kw) 0))
         supply-fixed-cost   (fn [i] (or (-> (vertices i) :supply :cost) 0))
-        supply-cost-per-kwh (fn [i] (or (-> (vertices i) :supply (get "cost/kwh")) 0))
-        supply-cost-per-kwp (fn [i] (or (-> (vertices i) :supply (get "cost/kwp")) 0))
+        supply-cost-per-kwh (fn [i] (or (-> (vertices i) :supply (get :cost%kwh)) 0))
+        supply-cost-per-kwp (fn [i] (or (-> (vertices i) :supply (get :cost%kwp)) 0))
         supply-emissions-per-kw (fn [i e]
                                   (* (or (-> (vertices i) :suppy :emissions (get e)) 0)
                                      hours-per-year))
         
 
         vertex-fixed-value   (fn [i] (or (-> (vertices i) :demand :value) 0))
-        vertex-value-per-kwp (fn [i] (or (-> (vertices i) :demand (get "value/kwp")) 0))
-        vertex-value-per-kwh (fn [i] (or (-> (vertices i) :demand (get "value/kwh")) 0))
+        vertex-value-per-kwp (fn [i] (or (-> (vertices i) :demand (get :value%kwp)) 0))
+        vertex-value-per-kwh (fn [i] (or (-> (vertices i) :demand (get :value%kwh)) 0))
         vertex-alternatives  (fn [i]
                                (-> (vertices i) :demand :alternatives keys set))
 
@@ -141,7 +141,7 @@
         insulation-allowed       (fn [i it]
                                    (-> (vertices i) :demand :insulation (contains? it)))
         insulation-fixed-cost    (fn [i it] (or (insulation-attr i it :cost) 0))
-        insulation-cost-per-kwh  (fn [i it] (or (insulation-attr i it "cost/kwh") 0))
+        insulation-cost-per-kwh  (fn [i it] (or (insulation-attr i it :cost%kwh) 0))
         insulation-max-kwh       (fn [i it] (or (insulation-attr i it :maximum) 0))
         insulation-min-kwh       (fn [i it] (or (insulation-attr i it :minimum) 0))
 
@@ -152,8 +152,8 @@
                                    (-> (vertices i) :demand :alternatives (contains? a)))
         
         alternative-fixed-cost   (fn [i a] (or (alternative-attr i a :cost) 0))
-        alternative-cost-per-kwp (fn [i a] (or (alternative-attr i a "cost/kwp") 0))
-        alternative-cost-per-kwh (fn [i a] (or (alternative-attr i a "cost/kwh") 0))
+        alternative-cost-per-kwp (fn [i a] (or (alternative-attr i a :cost%kwp) 0))
+        alternative-cost-per-kwh (fn [i a] (or (alternative-attr i a :cost%kwh) 0))
         alternative-emissions-per-kwh (fn [i a e]
                                         (or (-> (vertices i) :demand :alternatives (get a)
                                                 :emissions (get e))
@@ -279,7 +279,7 @@
         loss-w-per-kwp (memoize
                         (interpolate
                          (-> problem :pipe-losses (:kwp     [0]))
-                         (-> problem :pipe-losses (get "w/m" [0]))))
+                         (-> problem :pipe-losses (get :w%m [0]))))
         
         edge-loss-kw-for-kwp
         (fn [e kwp]
@@ -732,7 +732,7 @@
 
 (defn- solve [mip & {:keys [mip-gap time-limit]}]
   (let [sol-free (scip/solve mip :time-limit time-limit :mip-gap mip-gap
-                             "numerics/episilon" "1e-03"
+                             "numerics/epsilon" "1e-03"
                              "numerics/feastol"  "1e-03")
         
         sol-fix  (-> sol-free
@@ -742,7 +742,7 @@
                       ;; we have to relax these controls as otherwise
                       ;; we get tolerance issues from making all the
                       ;; flow constraints more rigid.
-                      "numerics/episilon" "1e-03"
+                      "numerics/epsilon" "1e-03"
                       "numerics/feastol" "1e-03")
                      (unfix-decisions))
         
