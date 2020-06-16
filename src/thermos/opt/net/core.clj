@@ -105,7 +105,7 @@
 
         edge-cost-per-kwp
         (fn [e] (let [e (get arc-map e)]
-                  (if e (* (:length e 0) (get e :cost%m 0)) 0)))
+                  (if e (* (:length e 0) (get e :cost%kwm 0)) 0)))
 
         supply-max-capacity (fn [i] (or (-> (vertices i) :supply :capacity-kw) 0))
         supply-fixed-cost   (fn [i] (or (-> (vertices i) :supply :cost) 0))
@@ -732,7 +732,7 @@
 
 (defn- solve [mip & {:keys [mip-gap time-limit]}]
   (let [sol-free (scip/solve mip :time-limit time-limit :mip-gap mip-gap
-                             "numerics/epsilon" "1e-03"
+                             ;; "numerics/epsilon" "1e-03"
                              "numerics/feastol"  "1e-03")
         
         sol-fix  (-> sol-free
@@ -742,7 +742,7 @@
                       ;; we have to relax these controls as otherwise
                       ;; we get tolerance issues from making all the
                       ;; flow constraints more rigid.
-                      "numerics/epsilon" "1e-03"
+                      ;; "numerics/epsilon" "1e-03"
                       "numerics/feastol" "1e-03")
                      (unfix-decisions))
         
@@ -751,8 +751,6 @@
         (= (summary-parameters sol-free)
            (summary-parameters sol-fix))]
     
-    
-
     ;; Copy solution information from the free version, except /value/
     ;; which is more true in the fixed one.
 
