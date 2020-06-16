@@ -17,7 +17,7 @@
 
 (t/deftest undiversify
   (let [problem
-        {:pipe-losses {:kwp [0], "w/m" [0]},
+        {:pipe-losses {:kwp [0], :w%m [0]},
          :vertices
          [{:id "A", :demand {:kwh 0, :kwp 30, :count 2, :required true}}
           {:id "B", :demand {:kwh 0, :kwp 30, :count 2, :required true}}
@@ -25,7 +25,7 @@
          :edges
          [{:id "1",
            :length 100,
-           "cost/kwm" 1, "cost/m" 0
+           :cost%kwm 1, :cost%m 0
            :i "A",
            :j "J",
            :bounds
@@ -34,7 +34,7 @@
             :mean [[0 0.1] [0 0.1]]}}
           {:id "2",
            :length 100,
-           "cost/kwm" 1, , "cost/m" 0
+           :cost%kwm 1, , :cost%m 0
            :i "B",
            :j "J",
            :bounds
@@ -43,7 +43,7 @@
             :mean [[0 0.1] [0 0.1]]}}
           {:id "3",
            :length 100,
-           "cost/kwm" 1, , "cost/m" 0
+           :cost%kwm 1, , :cost%m 0
            :i "J",
            :j "S",
            :bounds

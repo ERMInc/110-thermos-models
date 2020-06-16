@@ -41,13 +41,13 @@
             [clojure.test :as t]))
 
 (def problem
-  {:pipe-losses {:kwp [30], "w/m" [1]}
+  {:pipe-losses {:kwp [30], :w%m [1]}
    :vertices
    [{:id "a",
      :demand {:value 0, :kwh 1000, :kwp 30,}}
     {:id "b",
      :supply
-     {:capacity-kw 1000000, "cost/kwh" 1 :cost 1}}]
+     {:capacity-kw 1000000, :cost%kwh 1 :cost 1}}]
    
    :edges
    [
@@ -55,8 +55,8 @@
      :i "b",
      :j "a",
      :length 100,
-     "cost/m" 0
-     "cost/kwm" 1,
+     :cost%m 0
+     :cost%kwm 1,
      :bounds
      {
       :count [[1, 1], [1, 1]],
@@ -68,7 +68,7 @@
 
 (t/deftest alternative-a
   (let [problem  (assoc-in problem [:vertices 0 :demand :alternatives]
-                           [{:id 0, :cost 0, "cost/kwh" 4 }])
+                           [{:id 0, :cost 0, :cost%kwh 4 }])
         
 
         solution (sut/run-model problem)]
@@ -99,7 +99,7 @@
                 {:id     "b",
                  :supply {
                           :capacity-kw 1000000,
-                          "cost/kwh"   1,
+                          :cost%kwh   1,
                           :cost        1
                           }
                  }
@@ -110,8 +110,8 @@
                    :j      "j",
                    :length 100,
 
-                   "cost/m"   0
-                   "cost/kwm" 1,
+                   :cost%m   0
+                   :cost%kwm 1,
 
                    :bounds {
                             :count [[1, 2], [1, 2]],
@@ -124,8 +124,8 @@
                    :j      "a",
                    :length 0,
 
-                   "cost/m"   0
-                   "cost/kwm" 0,
+                   :cost%m   0
+                   :cost%kwm 0,
 
                    :bounds {
                             :count [[1, 1], [1, 1]],
@@ -138,8 +138,8 @@
                    :j      "c",
                    :length 0,
 
-                   "cost/m"   0
-                   "cost/kwm" 0,
+                   :cost%m   0
+                   :cost%kwm 0,
 
                    :bounds {
                             :count [[1, 1], [1, 1]],
@@ -158,7 +158,7 @@
 
     (t/is (true? (:connected (vertices "a"))))
     (t/is (true? (:connected (vertices "c"))))
-    (t/is (== 1876 (int (:output-kwh (vertices "b")))))
+    (t/is (≈ 1876 (int (:output-kwh (vertices "b"))) 2))
 
     (t/is (== 24 (int (:capacity-kw b->j))))
     (t/is (≈ 0.81 (:diversity b->j)))))
@@ -170,7 +170,7 @@
         
         (-> problem
             (assoc-in [:vertices 0 :demand :insulation]
-                      [ {:id 0, :minimum 0, :maximum 100, "cost/kwh" 0.9} ])
+                      [ {:id 0, :minimum 0, :maximum 100, :cost%kwh 0.9} ])
             (assoc-in [:vertices 0 :demand :required] true)
             (update-in [:vertices 1 :supply] dissoc :cost)
             )
@@ -206,7 +206,7 @@
             (update-in [:vertices 0 :demand]
                        assoc
                        :required true
-                       :insulation [ {:id 0, :minimum 0, :maximum 100, "cost/kwh" 1.1} ])
+                       :insulation [ {:id 0, :minimum 0, :maximum 100, :cost%kwh 1.1} ])
             (update-in [:vertices 1 :supply] dissoc :cost))
         solution (sut/run-model problem)
         vertices (sut/assoc-by :id (:vertices solution))
@@ -219,7 +219,7 @@
   (let [problem
         (-> problem
             (assoc-in [:vertices 0 :demand :alternatives]
-                      [ { :id 0, :cost 0, "cost/kwh"  5 } ]))
+                      [ { :id 0, :cost 0, :cost%kwh  5 } ]))
         
         solution (sut/run-model problem)
         vertices (sut/assoc-by :id (:vertices solution))
