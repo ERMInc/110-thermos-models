@@ -27,6 +27,8 @@
         :divisions   pos-int?
         :heat-demand time-series
         :grid-offer  time-series ;; electricity offer
+        :substation-load-kw
+        {not-nil?    time-series}
         :fuel
         {not-nil?
          {:price time-series

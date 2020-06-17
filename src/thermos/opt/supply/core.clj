@@ -148,12 +148,21 @@
         store-efficiency
         (fn [s] (-> s storage-options :efficiency))
 
+        substation-load
+        (fn [s [day hh]]
+          (-> profile (get day) :substation-load-kw (get s) (get hh 0)))
+        
         substation-max-reactive-power
-        (fn [s] (let [s (substations s)]
-                  (* (:alpha s 1.0) (:headroom-kwp s 0))))
+        (fn [s t]
+          (let [load-kw (substation-load s t)
+                s (substations s)]
+            (+ load-kw
+               (* (:alpha s 1.0) (:headroom-kwp s 0)))))
 
         substation-max-power
-        (fn [s] (-> s substations :headroom-kwp))
+        (fn [s t]
+          (- (-> s substations (:headroom-kwp 0))
+             (substation-load s t)))
 
         plant-fixed-cost
         (fn [p] (-> p plant-options :present-cost :fixed))
@@ -277,12 +286,12 @@
       ;; substation power balance constraints
       (for [s substation-ids t time-slices]
         [:<=
-         (- (substation-max-reactive-power s))
+         (- (substation-max-reactive-power s t))
          [:+ (for [p plant-types
                    :when (= s (plant-substation p))]
                ;; we allow grid-per-heat to vary by time
                [:* [:HEAT-OUTPUT-KW p t] (plant-grid-per-heat p t)])]
-         (substation-max-power s)])
+         (substation-max-power s t)])
       
       ;; constraints to transfer costs to cost variables
 
