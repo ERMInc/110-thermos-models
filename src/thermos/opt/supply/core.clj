@@ -277,11 +277,12 @@
           ]])
       
       ;; storage flow balance constraints
-      (for [s store-types t time-slices :let [h (slice-hours t)]]
+      (for [s store-types t time-slices :let [h (slice-hours t)]
+            :let [t* (previous-time-slice t)]]
         [:=
          [:CHARGE-KWH s t]
-         [:+ [:CHARGE-KWH s (previous-time-slice t)]
-          [* h [- [:FLOW-IN-KW s t] [:FLOW-OUT-KW s t]]]]])
+         [:+ [:CHARGE-KWH s t*]
+          [* h [- [:FLOW-IN-KW s t*] [:FLOW-OUT-KW s t*]]]]])
       
       ;; substation power balance constraints
       (for [s substation-ids t time-slices]
