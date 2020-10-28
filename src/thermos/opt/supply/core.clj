@@ -14,6 +14,11 @@
   - Plant & store sizes
 
   The problem is phrased as a MIP, after work by Marko Aunedi.
+
+  The main useful functions are `construct-mip` and `interpret-solution`, which see.
+
+  - `construct-mip` produces a MIP suitable for evaluation by the `lp.core` functoins
+  - `interpret-solution` extracts useful information from a solved MIP
   "
   (:require [thermos.opt.supply.specs :refer [supply-problem]]
             [thermos.opt.money :refer [pv-recurring pv-sequence periodic-sequence
@@ -424,7 +429,9 @@
   "Given `mip-sol`, which is the solved MIP associated with `problem`,
   interpret its variables to give information about the solution.
 
-  the result will have :plant, :storage, and :curtailment in it"
+  the result will have :plant, :storage, and :curtailment in it, and should be a valid
+  `thermos.opt.supply.specs/supply-solution`
+  "
   [mip-sol problem]
   (binding [*discount-rate*     (:discount-rate problem 0)
             *accounting-period* (:accounting-period problem 1)]

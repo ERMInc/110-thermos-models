@@ -65,4 +65,45 @@
        }})))
 
 
-
+(def supply-solution
+  (ds/spec
+   (let [cap-cost {:lifetime-cost number?
+                   :present-cost  number?
+                   :total-cost    number?}
+         op-cost  {:annual-cost  number?
+                   :present-cost number?
+                   :total-cost   number?}
+         profile  {not-nil? [number?]} ;; day-type => values
+         emission (merge op-cost
+                         {:annual-emission number?
+                          :total-emission number?})
+         ]
+     {:plant
+      {not-nil? ;; plant ID really
+       {:build                 boolean?
+        :capacity-kw           number?
+        :output                profile
+        :input                 profile
+        :capital-cost          cap-cost
+        :operating-cost        op-cost
+        :fuel-cost             op-cost
+        :output-kwh            number?
+        :emissions             {:nox  emission
+                                :co2  emission
+                                :pm25 emission}
+        (ds/opt :generation)   profile
+        (ds/opt :grid-revenue) op-cost
+        }
+       }
+      :storage
+      {not-nil? ;; storage id
+       {:capacity-kwh number?
+        :capacity-kw number?
+        :output profile
+        :input profile
+        :capital-cost cap-cost
+        }
+       }
+      :curtailment profile
+      }))
+  )
