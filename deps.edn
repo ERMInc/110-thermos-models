@@ -7,4 +7,4 @@
   cse/clj-lp
   {:git/url "https://github.com/cse-bristol/clj-lp.git",
    :tag "HEAD",
-   :sha "2c099ad77461e3c1b07bb0d34494d76edd2d0467"}}}
+   :sha "8dd473fdfe8d983a366493d7b57af603d6c935ad"}}}
