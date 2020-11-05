@@ -79,6 +79,15 @@
         emission   (set (keys (:emissions problem)))
         period     #{:peak :mean}
 
+        ;; this should give us a list of sets - each set contains the IDs
+        ;; of some dvtx which have to go on or off together
+        grouped-demands (->> (:vertices problem)
+                             (filter (comp :group :demand))
+                             (group-by (comp :group :demand))
+                             (s/transform [s/MAP-VALS s/ALL] :id)
+                             (map second)
+                             (map set))
+        
         alt-types  (set (mapcat (comp keys :alternatives :demand) (:vertices problem)))
         ins-types  (set (mapcat (comp keys :insulation :demand)   (:vertices problem)))
 
@@ -423,6 +432,10 @@
       (for [e edge :when (edge-required e)]
         [:>= [:+ [:AIN e] [:AIN (rev-edge e)]] 1]) ;; one is true
 
+      ;; Grouped demands travel together
+      (for [g grouped-demands]
+        [:= (for [i g] [:DVIN i])])
+      
       ;; [:= [:DEBUG :pipe-cost] total-pipe-cost]
       ;; [:= [:DEBUG :supply-cost] total-supply-cost]
       ;; [:= [:DEBUG :connection-value] total-connection-value]

@@ -15,11 +15,18 @@
 
        (ds/opt :required) boolean?
 
+       ;; value of connecting
        (ds/opt :value) number?
        (ds/opt :value%kwp) number?
        (ds/opt :value%kwh) number?
 
        (ds/opt :count) pos-int?
+
+       ;; Demands can be in a group.
+       ;; A whole group must be connected together.
+       ;; Group equivalence is determined by =
+       ;; No demand can be in two groups, WLOG.
+       (ds/opt :group) any?
        
        (ds/opt :insulation)
        [{:id any?
