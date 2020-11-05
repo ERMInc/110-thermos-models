@@ -433,7 +433,7 @@
         [:>= [:+ [:AIN e] [:AIN (rev-edge e)]] 1]) ;; one is true
 
       ;; Grouped demands travel together
-      (for [g grouped-demands]
+      (for [g grouped-demands :when (> (count g) 1)]
         [:= (for [i g] [:DVIN i])])
       
       ;; [:= [:DEBUG :pipe-cost] total-pipe-cost]
