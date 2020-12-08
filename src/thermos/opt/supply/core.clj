@@ -178,7 +178,6 @@
         plant-output-cost
         (fn [p s]
           (let [;; we need to use weighted hours, because it's a cost
-
                 duration (slice-weighted-hours s)
                 
                 {fuel :fuel chp :chp
@@ -198,7 +197,7 @@
                (+ other-cost
                   ;; emissions costs have been rolled into
                   ;; present-price of fuel
-                  (/ (+ fuel-price (if chp (* ep grid-offer) 0)) eh)))))
+                  (/ (+ fuel-price (if chp (* (or ep 0) grid-offer) 0)) eh)))))
 
         store-fixed-cost
         (fn [s] (-> s storage-options :present-cost :fixed))
@@ -218,9 +217,8 @@
         plant-grid-per-heat
         (fn [p t] (let [p (get plant-options p)]
                     (if (:chp p)
-                      (/ (:power-efficiency p) (:heat-efficiency p))
-                      (/ (:heat-efficiency p))
-                      )))
+                      (/ (:power-efficiency p 0) (:heat-efficiency p))
+                      (/ (:heat-efficiency p)))))
 
         store-max-capacity
         (fn [s] (-> s storage-options :capacity-kwh))
