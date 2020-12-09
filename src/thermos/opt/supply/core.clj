@@ -217,7 +217,7 @@
         plant-grid-per-heat
         (fn [p t] (let [p (get plant-options p)]
                     (if (:chp p)
-                      (/ (:power-efficiency p 0) (:heat-efficiency p))
+                      (/ (or (:power-efficiency p) 0) (:heat-efficiency p))
                       (/ (:heat-efficiency p)))))
 
         store-max-capacity
