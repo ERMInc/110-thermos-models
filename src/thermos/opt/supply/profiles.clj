@@ -22,7 +22,7 @@
                    (reduce + 0.0 (:values day)))))))
 
 (let [delta 0.1]
-  (>defn- near= [^double a ^double b]
+  (>defn near= [^double a ^double b]
     [double? double? => boolean?]
     (<= (Math/abs (- a b)) delta)))
 
@@ -75,7 +75,7 @@
             new-auc     (profile-area new-profile)]
         (cond
           (or
-           (> n 15)
+           (> n 20)
            (= lower upper)
            (near= new-auc normed-target-auc))
           
@@ -87,10 +87,20 @@
 
           (> new-auc normed-target-auc)
           ;; our α value is too small; we need to squash the shape more
-          (recur upper α (inc n))
+          (recur α upper (inc n))
           )))))
 
 (defn combine-buildings
+  "Scale / compress several profiles so that they have desired AUC and peak.
+  Then add them together and scale/compress the sum so that it has desired AUC and peak.
+
+  - `day-types` is a map like {day-type {:frequency f}} where f says how often day occurs in year
+  - `profiles` is a map like {profile-type {day-type [values]}}, saying the shape of profile-type on day-type
+  - `demands` is a list of maps having :profile, :kwh, :kwp. Each :profile is a key in `profiles`. :kwh and :kwp are AUC and kwp for the demand
+  - `target-kwh` and `target-peak` are the AUC and peak for the whole final curve.
+
+  Returns {day-type {:frequency f :values [...]}}
+  "
   [day-types ;; {day type => {:frequency frequency}}
    profiles  ;; {profile => {day type => values}}
    demands   ;; [{:profile p :kwh a :kwp p}]

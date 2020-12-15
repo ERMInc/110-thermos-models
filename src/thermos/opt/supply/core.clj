@@ -395,10 +395,17 @@
                       (pv-sequence (periodic-sequence cost-per-lifetime lifetime)))
      }))
 
-(defn- sum-over-profile [day-types quantity]
-  ;; output is {day type => [divisions]} for this plant
-  ;; so we want to scale up / down by day frequency & division
-  ;; to total up for a year.
+(defn sum-over-profile
+  "Given the scale information for a profile in `day-types` and a profiled value in `quantity`,
+  compute the area-under-curve for a year.
+
+  - The `day-types` is like {day-type {:frequency f :divisions d} ...}.
+  - The `quantity` is like {day-type [val val val] ...}
+
+  This assumes that whatever the frequencies total to, they should be
+  normalised to share of days in a year, so if you have exactly two
+  day types with same frequency, they each get half the year.
+  "
   {:test #(do
             (test/is
              (= 8760.0 (sum-over-profile
@@ -411,6 +418,10 @@
                  {0 {:frequency 1 :divisions 1}
                   1 {:frequency 1 :divisions 1}}
                  {0 [1] 1 [2]}))))}
+  [day-types quantity]
+  ;; output is {day type => [divisions]} for this plant
+  ;; so we want to scale up / down by day frequency & division
+  ;; to total up for a year.
     
   (let [total-frequency (reduce + 0 (map :frequency (vals day-types)))
         frequency-weight (/ 365.0 total-frequency)]
