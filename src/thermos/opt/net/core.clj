@@ -756,7 +756,7 @@
                       ;; we get tolerance issues from making all the
                       ;; flow constraints more rigid.
                       ;; "numerics/epsilon" "1e-03"
-                      "numerics/feastol" "1e-03")
+                      "numerics/feastol" "1e-02")
                      (unfix-decisions))
         
 
@@ -771,7 +771,7 @@
             :solution
             merge
             (-> (:solution sol-free)
-                (dissoc :value)
+                (dissoc :value :exists)
                 (assoc :stable stable)))))
 
 (defn output-solution [problem {:keys [vars solution] :as s} iters objective-values]
@@ -866,11 +866,13 @@
                               :mip-gap mip-gap
                               :time-limit
                               (max 60 (/ (- end-time (System/currentTimeMillis)) 1000.0)))
-            
+
             decisions  (summary-decisions solved-mip)
 
-            best       (if (> (-> solved-mip :solution (:value most-negative))
-                              (-> best       :solution (:value most-negative)))
+            best       (if (and
+                            (-> solved-mip :solution :exists)
+                            (> (-> solved-mip :solution :value (or most-negative))
+                               (-> best       :solution :value (or most-negative))))
                          solved-mip (or best solved-mip))
 
             is-stable  (:stable (:solution solved-mip))
