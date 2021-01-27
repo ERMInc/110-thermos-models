@@ -781,7 +781,7 @@
                   (-> (:solution sol-free)
                       (dissoc :value :exists)
                       (assoc :stable stable))))
-        )))))
+        ))))
 
 (defn output-solution [problem {:keys [vars solution] :as s} iters objective-values]
   (if (:exists solution)
