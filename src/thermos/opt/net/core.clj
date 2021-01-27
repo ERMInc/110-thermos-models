@@ -744,35 +744,44 @@
          [s (r (sd s))])])))
 
 (defn- solve [mip & {:keys [mip-gap time-limit]}]
-  (let [sol-free (scip/solve mip :time-limit time-limit :mip-gap mip-gap
-                             ;; "numerics/epsilon" "1e-03"
-                             "numerics/feastol"  "1e-03")
-        
-        sol-fix  (-> sol-free
-                     (parameterise) ;; reparameterise
-                     (fix-decisions)
-                     (scip/solve
-                      ;; we have to relax these controls as otherwise
-                      ;; we get tolerance issues from making all the
-                      ;; flow constraints more rigid.
-                      ;; "numerics/epsilon" "1e-03"
-                      "numerics/feastol" "1e-02")
-                     (unfix-decisions))
-        
+  (loop [attempts 0
+         mip      mip
+         ]
 
-        stable
-        (= (summary-parameters sol-free)
-           (summary-parameters sol-fix))]
-    
-    ;; Copy solution information from the free version, except /value/
-    ;; which is more true in the fixed one.
+    (let [sol-free (scip/solve mip
+                               :time-limit time-limit :mip-gap mip-gap
+                               "numerics/feastol"  "1e-03")
 
-    (update sol-fix
-            :solution
-            merge
-            (-> (:solution sol-free)
-                (dissoc :value :exists)
-                (assoc :stable stable)))))
+          sol-par (parameterise sol-free)
+          
+          sol-fix (-> sol-par
+                      (fix-decisions)
+                      (scip/solve
+                       "numerics/feastol" "1e-03")
+                      (unfix-decisions))
+          ]
+
+      (cond
+        (> attempts 2) sol-fix
+
+        (and (:exists (:solution sol-free)) (not (:exists (:solution sol-fix))))
+        (do
+          (log/error "Fixed solution is infeasible, but free solution is not! This will might break the optimisation; most likely cause is supply capacity is marginal relative to initial diversity guess. Will retry free solution with updated diversity.")
+          (recur (inc attempts) sol-par))
+        
+        :else
+        (let [stable
+              (= (summary-parameters sol-free)
+                 (summary-parameters sol-fix))]
+          ;; Copy solution information from the free version, except /value/
+          ;; which is more true in the fixed one.
+          (update sol-fix
+                  :solution
+                  merge
+                  (-> (:solution sol-free)
+                      (dissoc :value :exists)
+                      (assoc :stable stable))))
+        )))))
 
 (defn output-solution [problem {:keys [vars solution] :as s} iters objective-values]
   (if (:exists solution)
