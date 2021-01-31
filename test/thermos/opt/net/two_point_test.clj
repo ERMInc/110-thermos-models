@@ -57,12 +57,7 @@
      :length 100,
      :cost%m 0
      :cost%kwm 1,
-     :bounds
-     {
-      :count [[1, 1], [1, 1]],
-      :peak  [[0,35], [0,35]],
-      :mean  [[0,0.1],[0,0.1]]
-      }}]
+     }]
    }
   )
 
@@ -185,7 +180,7 @@
                       :insulation
                       (first)
                       (second)))))
-    (t/is (= 1775 (int (:output-kwh (vertices "b")))))))
+    (t/is (= 1776 (int (:output-kwh (vertices "b")))))))
 
 (t/deftest connect-a
   (let [problem

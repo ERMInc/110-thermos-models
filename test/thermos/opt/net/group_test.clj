@@ -18,7 +18,7 @@
       {:pipe-losses {:kwp [30], :w%m [1]}
        :vertices
        [{:id "a", :demand {:value 3000, :kwh 1000, :kwp 30,}}
-        {:id "b", :demand {:value 0, :kwh 1000, :kwp 30,}}
+        {:id "b", :demand {:value 0,    :kwh 1000, :kwp 30,}}
         {:id "s",
          :supply {:capacity-kw 1000000, :cost%kwh 1 :cost 1}}]
        
@@ -39,7 +39,7 @@
 
   ;; now if we put them in the same group, we don't connect b
   (let [problem (S/setval
-                 [:vertices S/ALL :demand :group]
+                 [:vertices S/ALL (S/must :demand) :group]
                  "G"
                  problem)
         sol (netopt/run-model problem)]
