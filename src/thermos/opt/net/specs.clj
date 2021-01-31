@@ -2,14 +2,14 @@
   (:require [spec-tools.data-spec :as ds]
             [clojure.spec.alpha :as s]))
 
-
-
 (def network-problem
   (ds/spec
    ::network-problem
 
    {:vertices
-    [{(ds/opt :demand)
+    [{:id any?
+
+      (ds/opt :demand)
       {:kwh number?
        :kwp number?
 
@@ -58,6 +58,7 @@
       (ds/opt :cost%m) number?
       (ds/opt :cost%kwm) number?
       (ds/opt :required) boolean?
+      (ds/opt :max-capacity%kwp) number?
       }]
     
     (ds/opt :emissions) {any? {(ds/opt :cost) number? (ds/opt :maximum) number?}}

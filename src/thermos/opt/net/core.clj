@@ -4,7 +4,11 @@
             [com.rpl.specter :as s]
             [lp.core :as lp]
             [clojure.tools.logging :as log]
-            [clojure.java.io :as io]))
+            [clojure.java.io :as io]
+            [thermos.opt.net.specs :refer [network-problem]]
+            [clojure.spec.alpha :as spec]
+            [thermos.opt.net.diversity :refer [diversity-factor]]
+            [thermos.opt.net.bounds :as bounds]))
 
 (def ^:const hours-per-year (* 24.0 365))
 
@@ -39,19 +43,18 @@
                       fr (- x px2)]
                   (+ py2 (* fr m)))))))))))
 
-(defn- diversity-factor [problem]
-  (let [limit (:diversity-limit problem 0.62)
-        rate (:diversity-rate problem 1.0)]
-    (fn [n]
-      (/ (Math/round
-          (* 100.0
-             (+ limit
-                (/ (- 1 limit)
-                   (max 1 (* rate n))))))
-         100.0))))
+(defn- valid? [x y]
+  (let [is-valid (spec/valid? x y)]
+    (when-not is-valid
+      (log/error (spec/explain-str x y)))
+    is-valid))
 
 (defn construct-mip [problem]
-  (let [;; regroup insulation and alternatives
+  {:pre [(valid? network-problem problem)]}
+  (let [flow-bounds (or (:bounds problem)
+                        (bounds/compute-bounds problem))
+
+        ;; regroup insulation and alternatives
         problem    (s/multi-transform
                     [(s/putval :id)
 
@@ -61,11 +64,8 @@
                      (s/multi-path
                       [:demand :alternatives (s/terminal assoc-by)]
                       [:demand :insulation   (s/terminal assoc-by)]
-                      )
-                     ]
-                    
-                    problem
-                    )
+                      )]
+                    problem)
 
         ;; indexing sets
         edge       (set (for [e (:edges problem)] (as-edge (:i e) (:j e))))
@@ -105,8 +105,6 @@
 
         demand-is-required
         (fn [i] (boolean (-> vertices (get i) :demand :required)))
-
-        
 
         edge-fixed-cost
         (fn [e] (let [e (get arc-map e)]
@@ -198,7 +196,10 @@
                              ;; This is done here instead of as a preprocessing step because we only want to do it for
                              ;; networks - for individual systems we want the diversified value.
 
-                             ;; Since we only want this happening in here, demand-kw is closed over by unmet-demand
+                             ;; Since we only want this happening in here, demand-kw is closed over by unmet-demand.
+                             ;; An analogous change happens in flow-bounds calculation in bounds.clj.
+                             ;; This is to make sure that, if we are sending un-diversified demand up a pipe
+                             ;; we have an un-diversified upper bound for that pipe's capacity
                              (/ (demand-kwp i)
                                 (diversity (vertex-demand-count i)))))
               ]
@@ -299,50 +300,31 @@
         (reduce
          +
          (for [e edge]
-           (let [[[_ max-fwd] [_ max-back]]
-                 (-> (get arc-map e) :bounds :peak)
-                 max-fwd (or max-fwd 0)
-                 max-back (or max-back 0)]
+           (let [max-fwd  (:peak-max (get flow-bounds e) 0)
+                 max-back (:peak-max (get flow-bounds (rev-edge e)) 0)]
              (edge-loss-kw-for-kwp e (max max-fwd max-back)))))
 
         arc-max-mean-flow
         (into
-         {}
-         (for [a arc]
-           (let [edge (get arc-map a)
-                 [[_ max-fwd] [_ max-back]] (-> edge :bounds :mean)]
-             ;; question here is whether a is same direction or reverse direction
-             [a (if (= (:i edge) (first a)) max-fwd max-back)])))
+         {} (for [a arc] [a (:mean-max (get flow-bounds a) 0)]))
         
         arc-max-peak-flow
         (into
-         {}
-         (for [a arc]
-           (let [edge (get arc-map a)
-                 [[_ max-fwd] [_ max-back]] (-> edge :bounds :peak)]
-             ;; question here is whether a is same direction or reverse direction
-             [a (if (= (:i edge) (first a)) max-fwd max-back)])))
+         {} (for [a arc] [a (:peak-max (get flow-bounds a) 0)]))
 
-        edge-max-flow
-        (fn [e]
-          (let [e' (rev-edge e)]
-            (max
-             (arc-max-mean-flow e)
-             (arc-max-peak-flow e)
-             (arc-max-mean-flow e')
-             (arc-max-peak-flow e')
-             )))
+        edge-max-flow ;; this is the max capacity when diversified.
+        (fn [e] (-> (arc-map e) (:max-capacity%kwp 100000.0)))
         
-        flow-upper-bound (fn [a p]
-                           (let [arc-bound
-                                 (case p
-                                   :mean (arc-max-mean-flow a)
-                                   :peak (arc-max-peak-flow a))]
-                             (if (zero? arc-bound) 0
-                                 (* flow-bound-slack (+ arc-bound max-loss-kw)))))
-
+        flow-upper-bound ;; this is our best guess on the max
+                         ;; un-diverse flow on this arc
+        (fn [a p]
+          (let [arc-bound
+                (case p
+                  :mean (+ (arc-max-mean-flow a) max-loss-kw)
+                  :peak (arc-max-peak-flow a))]
+            (if (zero? arc-bound) 0
+                (* flow-bound-slack arc-bound))))
         
-
         total-count (reduce + (map #(:count (:demand %) 1) (filter :demand (:vertices problem))))
         
         initial-supply-diversity (diversity total-count)
@@ -467,8 +449,9 @@
           {:indexed-by [edge] :fixed true
            :value ;; intial diversity is super-optimistic
            (fn [e]
-             (let [ [ [_ fwd] [_ bwd] ] (-> arc-map (get e) :bounds :count)]
-               (diversity (max fwd bwd))))}
+             (diversity
+              (max (:count-max (get flow-bounds e) 0)
+                   (:count-max (get flow-bounds (rev-edge e)) 0))))}
           
           :SUPPLY-DIVERSITY
           {:indexed-by [svtx] :fixed true
@@ -478,11 +461,10 @@
           {:indexed-by [edge] :fixed true
            :value
            (fn [e]
-             (let [[[min-fwd _] [min-back _]] (-> (get arc-map e) :bounds :mean)
-                   min-fwd  (or min-fwd 0)
-                   min-back (or min-back 0)
+             (let [min-fwd  (:peak-min (get flow-bounds e) 0)
+                   min-back (:peak-min (get flow-bounds (rev-edge e)) 0)
                    min-flow (min min-fwd min-back)
-                   kwp (if (zero? min-flow) (max min-fwd min-back) min-flow)]
+                   kwp      (if (zero? min-flow) (max min-fwd min-back) min-flow)]
                (edge-loss-kw-for-kwp e kwp)))}
 
           ;; VARIABLES
@@ -565,16 +547,6 @@
    {} (postorder children root)))
 
 (defn- truthy [v] (or (= true v) (and (number? v) (> v 0.5))))
-
-(defn- diversity-factor
-  ([rate limit n]
-   (/ (Math/round
-       (* 100.0 (+ limit (/ (- 1.0 limit) (max 1.0 (* n rate))))))
-      100.0))
-  ([problem]
-   (let [rate  (:diversity-rate problem 1.0)
-         limit (:diversity-limit problem 0.62)]
-     (fn [n] (diversity-factor rate limit n)))))
 
 (defn- compute-parameters
   "The mip has been solved, so we can figure out the diversity & heat
