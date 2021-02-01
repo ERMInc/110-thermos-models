@@ -823,32 +823,49 @@
     {:state (:reason solution)})
   )
 
+(defn- human-time [msec]
+  (let [sec (/ msec 1000.0)]
+    (if (< sec 60)
+      (str (int sec) "s")
+
+      (let [min (/ sec 60.0)]
+        (if (< min 60)
+          (format "%.1fm" min)
+          (let [hr (/ min 60.0)]
+            (if (< hr 24)
+              (format "%.1fh" hr)
+              (let [d (int (/ hr 24))
+                    hr (- hr (* d 24))]
+                (str d "d" (int hr) "h")))))))))
+
 (defn run-model [problem]
   (log/info "Solving network problem")
-  (let [mip (construct-mip problem)
-        _ (log/info "Constructed MIP")
+  (let [mip             (construct-mip problem)
+        _               (log/info "Constructed MIP")
         iteration-limit (:iteration-limit problem 100000)
-        time-limit (:time-limit problem 1.0)
-        mip-gap    (:mip-gap problem 0.05)
+        time-limit      (:time-limit problem 1.0)
+        mip-gap         (:mip-gap problem 0.05)
 
-        end-time (+ (* time-limit 1000 3600)
-                    (System/currentTimeMillis))
-
+        start-time      (System/currentTimeMillis)
+        end-time (+ (* time-limit 1000 3600) start-time)
         most-negative (- Double/MAX_VALUE)
         ]
-
-    (loop [mip   mip ;; comes parameterised out of the gate
-           seen  #{} ;; decision sets we have already seen
-           iters 0   ;; number of tries
-           obj-vals  nil ;; objective value sequence we saw
-           best  nil ;; best so far
+    (log/info "N\tTn\tT\tTR\tSTATUS\tBEST\tVALUE")
+    
+    (loop [mip      mip ;; comes parameterised out of the gate
+           seen     #{} ;; decision sets we have already seen
+           iters    0   ;; number of tries
+           obj-vals nil ;; objective value sequence we saw
+           best     nil ;; best so far
            ]
-      (let [solved-mip (solve mip
+      (let [iteration-start (System/currentTimeMillis)
+
+            solved-mip (solve mip
                               :mip-gap mip-gap
                               :time-limit
-                              (max 60 (/ (- end-time (System/currentTimeMillis)) 1000.0)))
+                              (max 60 (/ (- end-time iteration-start) 1000.0)))
 
-            decisions  (summary-decisions solved-mip)
+            decisions (summary-decisions solved-mip)
 
             best       (if (and
                             (-> solved-mip :solution :exists)
@@ -856,15 +873,22 @@
                                (-> best       :solution :value (or most-negative))))
                          solved-mip (or best solved-mip))
 
-            is-stable  (:stable (:solution solved-mip))
-            has-looped (contains? seen decisions)
-            out-of-iters (> iters iteration-limit)
-            out-of-time (> (System/currentTimeMillis) end-time)
+            is-stable     (:stable (:solution solved-mip))
+            has-looped    (contains? seen decisions)
+            out-of-iters  (> iters iteration-limit)
+            iteration-end (System/currentTimeMillis)
+            out-of-time   (> iteration-end end-time)
+            remaining-time (- end-time iteration-end)
             ]
 
-        (log/info "Iteration" iters "of" iteration-limit
-                  "remaining time" (/ (- end-time (System/currentTimeMillis)) 1000.0)
-                  "Solution" (dissoc (:solution solved-mip) :log))
+        (log/info (format "%d\t%s\t%s\t%s\t%s\t%s\t%.2g"
+                          iters
+                          (human-time (- iteration-end iteration-start))
+                          (human-time (- iteration-end start-time))
+                          (human-time remaining-time)
+                          (:reason (:solution solved-mip))
+                          (if (identical? best solved-mip) "*" "-")
+                          (:value  (:solution solved-mip))))
         
         (when is-stable    (log/info "Solution is stable"))
         (when has-looped   (log/info "Solution is looping"))
