@@ -734,12 +734,13 @@
           ]
 
       (cond
-        (> attempts 2) sol-fix
+        (> attempts 2)
+        (do
+          (log/error "A feasible free solution led to an infeasible fixed solution too many times. This probably means that the supply capacity is very marginal, and the optimiser can't work out whether to include or exclude a particular demand.")
+          sol-fix)
 
         (and (:exists (:solution sol-free)) (not (:exists (:solution sol-fix))))
-        (do
-          (log/error "Fixed solution is infeasible, but free solution is not! This will might break the optimisation; most likely cause is supply capacity is marginal relative to initial diversity guess. Will retry free solution with updated diversity.")
-          (recur (inc attempts) sol-par))
+        (recur (inc attempts) sol-par)
         
         :else
         (let [stable
@@ -850,7 +851,9 @@
         end-time (+ (* time-limit 1000 3600) start-time)
         most-negative (- Double/MAX_VALUE)
         ]
-    (log/info "N\tTn\tT\tTR\tSTATUS\tBEST\tVALUE")
+    (log/info
+     (format "%-4s%-8s%-8s%-8s%-3s%-10s%-6s%-6s%-12s"
+             "N" "Tn" "T" "Tr" ">" "VALUE" "NV" "NE" "STATE"))
     
     (loop [mip      mip ;; comes parameterised out of the gate
            seen     #{} ;; decision sets we have already seen
@@ -881,22 +884,34 @@
             remaining-time (- end-time iteration-end)
             ]
 
-        (log/info (format "%d\t%s\t%s\t%s\t%s\t%s\t%.2g"
-                          iters
-                          (human-time (- iteration-end iteration-start))
-                          (human-time (- iteration-end start-time))
-                          (human-time remaining-time)
-                          (:reason (:solution solved-mip))
-                          (if (identical? best solved-mip) "*" "-")
-                          (:value  (:solution solved-mip))))
+        (log/info (try (format "%-4d%-8s%-8s%-8s%-3s%-10.2g%-6d%-6d%-12s"
+                               iters
+                               (human-time (- iteration-end iteration-start))
+                               (human-time (- iteration-end start-time))
+                               (human-time remaining-time)
+                               
+                               (if (identical? best solved-mip) "*" "-")
+                               (:value  (:solution solved-mip))
+                               (-> solved-mip :vars :DVIN :value vals
+                                   (->> (reduce (fn [n v] (cond-> n v inc)) 0)))
+                               (-> solved-mip :vars :AIN  :value vals
+                                   (->> (reduce (fn [n v] (cond-> n v inc)) 0)))
+                               (:reason (:solution solved-mip))
+                               )
+                       (catch Exception e
+                         "Error formatting progress row!"))
+                  
+                  )
         
-        (when is-stable    (log/info "Solution is stable"))
-        (when has-looped   (log/info "Solution is looping"))
-        (when out-of-iters (log/info "Iteration limit reached"))
-        (when out-of-time  (log/info "Time limit reached"))
         
         (if (or has-looped out-of-iters out-of-time is-stable)
-          (output-solution problem best iters obj-vals)
+          (do
+            (when is-stable    (log/info "Solution is stable"))
+            (when has-looped   (log/info "Solution is looping"))
+            (when out-of-iters (log/info "Iteration limit reached"))
+            (when out-of-time  (log/info "Time limit reached"))
+            (log/info "Best solution:" (dissoc (:solution best) :log))
+            (output-solution problem best iters obj-vals))
           (recur solved-mip (conj seen decisions) (inc iters)
                  (conj obj-vals (:value (:solution solved-mip)))
                  best)
