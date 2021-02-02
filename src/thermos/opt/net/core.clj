@@ -369,6 +369,20 @@
          [>= [:EDGE-CAP-KW e] [:ARC-FLOW-KW a :mean]]
          ])
 
+      ;; force dvin if arc is providing heat to a building - this
+      ;; means heat cannot flow through any member of dvtx or svtx
+      ;; without connecting that vertex
+      (for [d dvtx
+            n (neighbours d)
+            t period]
+        (let [out  [:ARC-FLOW-KW [d n] t]
+              back [:ARC-FLOW-KW [n d] t]
+              is-in (if (contains? svtx d)
+                      [+ [:SVIN d] [:DVIN d]]
+                      [:DVIN d])]
+          [:and
+           [<= out  [* is-in [:lp.core/upper out]]]
+           [<= back [* is-in [:lp.core/upper back]]]]))
       
       ;; supply capacity sufficient
       (for [i svtx]
