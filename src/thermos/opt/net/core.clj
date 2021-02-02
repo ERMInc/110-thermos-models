@@ -390,7 +390,6 @@
          [>= [:SUPPLY-CAP-KW i] [* [:SUPPLY-KW i :peak] [:SUPPLY-DIVERSITY i]]]
          [>= [:SUPPLY-CAP-KW i] [:SUPPLY-KW i :mean]]
          [<= [:SUPPLY-CAP-KW i] [* [:SVIN i] (supply-max-capacity i)]]
-         ;; [<= [:SUPPLY-CAP-KW i] (supply-max-capacity i)] ;; redundant really
          ])
 
       ;; not too many supplies
@@ -731,9 +730,7 @@
 
 (defn- solve [mip & {:keys [mip-gap time-limit]}]
   (loop [attempts 0
-         mip      mip
-         ]
-
+         mip      mip]
     (let [sol-free (scip/solve mip
                                :time-limit time-limit :mip-gap mip-gap
                                "numerics/feastol"  "1e-03")
@@ -746,7 +743,6 @@
                        "numerics/feastol" "1e-03")
                       (unfix-decisions))
           ]
-
       (cond
         (> attempts 2)
         (do
