@@ -763,8 +763,9 @@
                   merge
                   (-> (:solution sol-free)
                       (dissoc :value :exists)
-                      (assoc :stable stable))))
-        ))))
+                      (assoc :stable stable)
+                      (assoc :free-value (:value (:solution sol-free)))))))
+      )))
 
 (defn output-solution [problem {:keys [vars solution] :as s} iters objective-values]
   (if (:exists solution)
@@ -790,7 +791,6 @@
           has-alternative (fn [i]
                             (some #(get alternative [i %]) alt-types))
           ]
-      
       (log/info "Summarising results")
       {:edges
        (for [e edge :when (or (ain e) (ain (rev-edge e)))]
@@ -853,17 +853,18 @@
   (log/info "Solving network problem")
   (let [mip             (construct-mip problem)
         _               (log/info "Constructed MIP")
-        iteration-limit (:iteration-limit problem 100000)
+        iteration-limit (:iteration-limit problem 1000)
         time-limit      (:time-limit problem 1.0)
         mip-gap         (:mip-gap problem 0.05)
-
+        param-fix-gap   (:param-gap problem 0)
+        
         start-time      (System/currentTimeMillis)
         end-time (+ (* time-limit 1000 3600) start-time)
         most-negative (- Double/MAX_VALUE)
         ]
     (log/info
-     (format "%-4s%-8s%-8s%-8s%-3s%-10s%-6s%-6s%-12s"
-             "N" "Tn" "T" "Tr" ">" "VALUE" "NV" "NE" "STATE"))
+     (format "%-4s%-8s%-8s%-8s%-3s%-10s%-6s%-6s%-12s%-7s%-7s"
+             "N" "Tn" "T" "Tr" ">" "VALUE" "NV" "NE" "STATE" "δFIX%" "GAP%"))
     
     (loop [mip      mip ;; comes parameterised out of the gate
            seen     #{} ;; decision sets we have already seen
@@ -880,8 +881,10 @@
 
             decisions (summary-decisions solved-mip)
 
+            solution-exists (-> solved-mip :solution :exists)
+            
             best       (if (and
-                            (-> solved-mip :solution :exists)
+                            solution-exists
                             (> (-> solved-mip :solution :value (or most-negative))
                                (-> best       :solution :value (or most-negative))))
                          solved-mip (or best solved-mip))
@@ -892,9 +895,16 @@
             iteration-end (System/currentTimeMillis)
             out-of-time   (> iteration-end end-time)
             remaining-time (- end-time iteration-end)
+            parameter-delta (when solution-exists
+                              (let [{:keys [value free-value]} (:solution solved-mip)]
+                                (when (and value free-value)
+                                  (/ (- value free-value) (max value free-value)))))
+            param-effect-small
+            (and solution-exists parameter-delta
+                 (<= (Math/abs parameter-delta) param-fix-gap))
             ]
 
-        (log/info (try (format "%-4d%-8s%-8s%-8s%-3s%-10.2g%-6d%-6d%-12s"
+        (log/info (try (format "%-4d%-8s%-8s%-8s%-3s%-10.2g%-6d%-6d%-12s%-7.1g%-7.2g"
                                iters
                                (human-time (- iteration-end iteration-start))
                                (human-time (- iteration-end start-time))
@@ -907,6 +917,8 @@
                                (-> solved-mip :vars :AIN  :value vals
                                    (->> (reduce (fn [n v] (cond-> n v inc)) 0)))
                                (:reason (:solution solved-mip))
+                               (* 100 (or parameter-delta 99))
+                               (* (:gap (:solution solved-mip) 99) 100)
                                )
                        (catch Exception e
                          "Error formatting progress row!"))
@@ -914,8 +926,9 @@
                   )
         
         
-        (if (or has-looped out-of-iters out-of-time is-stable)
+        (if (or has-looped out-of-iters out-of-time is-stable param-effect-small)
           (do
+            (when param-effect-small (log/info "Parameter fixing has small effect") )
             (when is-stable    (log/info "Solution is stable"))
             (when has-looped   (log/info "Solution is looping"))
             (when out-of-iters (log/info "Iteration limit reached"))
