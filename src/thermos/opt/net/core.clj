@@ -898,7 +898,9 @@
             parameter-delta (when solution-exists
                               (let [{:keys [value free-value]} (:solution solved-mip)]
                                 (when (and value free-value)
-                                  (/ (- value free-value) (max value free-value)))))
+                                  (if (= value free-value) 0
+                                      (/ (- value free-value)
+                                         (inc (Math/abs (max value free-value))))))))
             param-effect-small
             (and solution-exists parameter-delta
                  (<= (Math/abs parameter-delta) param-fix-gap))
