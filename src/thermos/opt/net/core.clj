@@ -919,16 +919,22 @@
                                
                                (if (identical? best solved-mip) "*" "-")
                                (:value  (:solution solved-mip))
-                               (-> solved-mip :vars :DVIN :value vals
-                                   (->> (reduce (fn [n v] (cond-> n v inc)) 0)))
-                               (-> solved-mip :vars :AIN  :value vals
-                                   (->> (reduce (fn [n v] (cond-> n v inc)) 0)))
+                               (if solution-exists
+                                 (-> solved-mip :vars :DVIN :value vals
+                                     (->> (reduce (fn [n v] (cond-> n v inc)) 0)))
+                                 0)
+                               (if solution-exists
+                                 (-> solved-mip :vars :AIN  :value vals
+                                     (->> (reduce (fn [n v] (cond-> n v inc)) 0)))
+                                 0)
                                (:reason (:solution solved-mip))
-                               (* 100 (or parameter-delta 99))
-                               (* (:gap (:solution solved-mip) 99) 100)
+                               (* (or parameter-delta 99) 100.0)
+                               (* (:gap (:solution solved-mip) 99) 100.0)
                                )
                        (catch Exception e
-                         "Error formatting progress row!"))
+                         (log/error e "Error formatting progress row!")
+                         "Urgh"
+                         ))
                   
                   )
         
