@@ -383,6 +383,11 @@
           [:and
            [<= out  [* is-in [:lp.core/upper out]]]
            [<= back [* is-in [:lp.core/upper back]]]]))
+
+      ;; we also wish to say that if you build a pipe it should carry some peak flow.
+      ;; this prevents the optimiser building pipes to nowhere, which can otherwise
+      ;; happen if they don't cost much
+      (for [a arc] [<= [:AIN a] [:ARC-FLOW-KW a :peak]])
       
       ;; supply capacity sufficient
       (for [i svtx]
@@ -390,8 +395,8 @@
          [>= [:SUPPLY-CAP-KW i] [* [:SUPPLY-KW i :peak] [:SUPPLY-DIVERSITY i]]]
          [>= [:SUPPLY-CAP-KW i] [:SUPPLY-KW i :mean]]
          [<= [:SUPPLY-CAP-KW i] [* [:SVIN i] (supply-max-capacity i)]]
-         ])
-
+         [<= [:SVIN i] [:SUPPLY-KW i :peak]]])
+      
       ;; not too many supplies
       (when supply-count-max
         [<= [+ (for [i svtx] [:SVIN i])] supply-count-max])
