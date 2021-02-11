@@ -774,7 +774,7 @@
                       (assoc :free-value (:value (:solution sol-free)))))))
       )))
 
-(defn output-solution [problem {:keys [vars solution] :as s} iters objective-values]
+(defn output-solution [{:keys [vars solution] :as s} iters objective-values]
   (if (:exists solution)
     (let [edge           (::edge s)
           alt-types      (::alt-types s)
@@ -949,7 +949,7 @@
             (when out-of-iters (log/info "Iteration limit reached"))
             (when out-of-time  (log/info "Time limit reached"))
             (log/info "Best solution:" (dissoc (:solution best) :log))
-            (output-solution problem best iters obj-vals))
+            (output-solution best iters obj-vals))
           (recur solved-mip (conj seen decisions) (inc iters)
                  (conj obj-vals (:value (:solution solved-mip)))
                  best)
