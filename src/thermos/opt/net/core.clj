@@ -742,11 +742,13 @@
 
           sol-par (parameterise sol-free)
           
-          sol-fix (-> sol-par
-                      (fix-decisions)
-                      (scip/solve
-                       "numerics/feastol" "1e-03")
-                      (unfix-decisions))
+          sol-fix (if (:exists (:solution sol-free))
+                    (-> sol-par
+                        (fix-decisions)
+                        (scip/solve
+                         "numerics/feastol" "1e-03")
+                        (unfix-decisions))
+                    sol-free)
           ]
       (cond
         (> attempts 2)
