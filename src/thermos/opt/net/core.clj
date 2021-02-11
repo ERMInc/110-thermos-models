@@ -920,26 +920,27 @@
                                (human-time remaining-time)
                                
                                (if (identical? best solved-mip) "*" "-")
-                               (:value  (:solution solved-mip))
-                               (if solution-exists
-                                 (-> solved-mip :vars :DVIN :value vals
-                                     (->> (reduce (fn [n v] (cond-> n v inc)) 0)))
-                                 0)
-                               (if solution-exists
-                                 (-> solved-mip :vars :AIN  :value vals
-                                     (->> (reduce (fn [n v] (cond-> n v inc)) 0)))
-                                 0)
+                               (or (:value  (:solution solved-mip)) Double/NaN)
+
+                               (try (if solution-exists
+                                      (-> solved-mip :vars :DVIN :value vals
+                                          (->> (reduce (fn [n v] (cond-> n v inc)) 0)))
+                                      -1)
+                                    (catch Exception e -1))
+
+                               (try (if solution-exists
+                                      (-> solved-mip :vars :AIN  :value vals
+                                          (->> (reduce (fn [n v] (cond-> n v inc)) 0)))
+                                      -1)
+                                    (catch Exception e -1))
+
                                (:reason (:solution solved-mip))
-                               (* (or parameter-delta 99) 100.0)
-                               (* (:gap (:solution solved-mip) 99) 100.0)
-                               )
+                               (* (or parameter-delta Double/NaN) 100.0)
+                               (* (or (:gap (:solution solved-mip)) Double/NaN) 100.0))
+                       
                        (catch Exception e
-                         (log/error e "Error formatting progress row!")
-                         "Urgh"
-                         ))
-                  
-                  )
-        
+                         (log/error e "Unable to format row in table")
+                         (str (dissoc (:solution solved-mip) :log)))))
         
         (if (or has-looped out-of-iters out-of-time is-stable param-effect-small)
           (do
