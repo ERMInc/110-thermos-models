@@ -798,7 +798,6 @@
           has-alternative (fn [i]
                             (some #(get alternative [i %]) alt-types))
           ]
-      (log/info "Summarising results")
       {:edges
        (for [e edge :when (or (ain e) (ain (rev-edge e)))]
          {:i           (first e)
@@ -838,8 +837,8 @@
        :solver    (assoc solution
                          :objectives objective-values
                          :iterations iters)})
-    {:state (:reason solution)})
-  )
+    {:state (:reason solution)}))
+
 
 (defn- human-time [msec]
   (let [sec (/ msec 1000.0)]
