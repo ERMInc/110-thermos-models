@@ -214,6 +214,60 @@
       solution
       )))
 
+(defn bridges
+  "Find the bridges in a graph. Within a problem the bounds are determined as:
+  - If an edge is a bridge, what's on either side
+  - If an edge is not a bridge, almost everything in the same component as it
+  "
+  [graph]
+  (let [t       (volatile! 0)   ;; counter for what vertex we are on in DFS
+        visited (volatile! #{}) ;; where have we been
+        tin     (volatile! {})  ;; what was 't' when we entered a vertex
+        low     (volatile! {})  ;; min(tin[v], tin[ancestors of v]), i.e.
+                                ;; the earliest tin of an ancestor
+
+        dfs     (fn dfs [v prev]
+                  (vswap! visited conj v)
+                  (let [time (vswap! t inc)]
+                    (vswap! tin assoc v time)
+                    (vswap! low assoc v time))
+
+                  (reduce
+                   (fn adj-loop [bridges to]
+                     (cond
+                       (= to prev) bridges
+
+                       (contains? @visited to)
+                       (do (vswap! low update v min (get @tin to))
+                           bridges)
+                       
+                       :else
+                       (into
+                        (let [nxt (dfs to v)]
+                          (vswap! low update v min (get @low to))
+
+                          (cond-> nxt
+                            ;; low[to] can only be more than tin[v] if
+                            ;; there was no other way to get to to
+                            ;; than from v, because we know we did DFS
+                            ;; from v's ancestors already, so if you
+                            ;; can get to to from one of them low[to]
+                            ;; will tell us so.
+                            (> (get @low to) (get @tin v))
+                            (conj [via to])))
+                        
+                        bridges)))
+                   nil
+                   (graph v)))
+        ]
+    (reduce
+     (fn vtx-loop [a v]
+       (if (get @visited v)
+         a
+         (into (dfs v nil) a)))
+     nil
+     (keys graph))))
+
 (comment
   (= (compute-bounds
       {:vertices

@@ -541,7 +541,12 @@
      ::vtx-map vertices
      }))
 
-(defn- postorder [children root]
+(defn- postorder
+  "A postorder traversal starting at `root` of adjacency relation `children`.
+  Returns a seq which contains [::node x] when it hits a node, [::edge x y]
+  when traversing that edge, and [::loop x] when we would enter a cycle involving x
+  "
+  [children root]
   (let [walk (fn walk [visited from node]
                (if (visited node)
                  [[::loop node]]
@@ -553,7 +558,21 @@
                   )))]
     (walk #{} nil root)))
 
-(defn- count-up [root children f r]
+;; TODO this does not work exactly right when there is a diamond in the graph
+
+(defn- count-up
+  "On a graph starting at `root`, with adjacency given by `children`,
+  produce a map from nodes and edges to reducing (f x) with r, where xs are the
+  children of that node or edge.
+
+  For example
+
+  (count-up :a {:a [:b] :b [:c :d]} (constantly 1) +)
+   => {:a 4 :b 3 :c 1, :d 1, ;; count of subtree rooted at node
+       [:b :c] 1, [:b :d] 1, [:a :b] 3 ;; count of subtree reachable through edge
+      }
+  "
+  [root children f r]
   (reduce
    (fn [acc item]
      (case (first item)
@@ -604,8 +623,9 @@
         edge-counts                   ; the number of proper demands
                                         ; reachable through each edge
         (apply merge-with max-0
-               (for [s roots] (count-up s adj #(if (dvin? %)
-                                                 (-> vtx-map (get %) :demand (:count 1)) 0) +)))
+               (for [s roots]
+                 (count-up s adj #(if (dvin? %)
+                                    (-> vtx-map (get %) :demand (:count 1)) 0) +)))
 
         edge-max-peak-flow            ; the largest individual peak
                                         ; demand through each edge
@@ -966,4 +986,10 @@
 
   (def soln (run-model problem))
 
+  (def junk (output-solution nil -last-solution nil nil ))
+
+  (def soln
+    (binding [lp.io/*keep-temp-dir* true]
+      (run-model -last-problem)
+      ))
   )
