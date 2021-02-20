@@ -51,6 +51,7 @@
 
 (defn construct-mip [problem]
   {:pre [(valid? network-problem problem)]}
+
   (let [flow-bounds (or (:bounds problem)
                         (bounds/compute-bounds problem))
 
@@ -541,47 +542,36 @@
      ::vtx-map vertices
      }))
 
-(defn- postorder
-  "A postorder traversal starting at `root` of adjacency relation `children`.
-  Returns a seq which contains [::node x] when it hits a node, [::edge x y]
-  when traversing that edge, and [::loop x] when we would enter a cycle involving x
+(defn- fix-adj
+  "Compute the fixed point of adj under itself. Return a map like adj but
+  where every vertex maps to all vertices reachable from it, rather than just its edges.
+
+  Invoked with `roots` it only computes values for things reachable
+  from roots, which makes it a bit quicker.
   "
-  [children root]
-  (let [walk (fn walk [visited from node]
-               (if (visited node)
-                 [[::loop node]]
-                 (concat
-                  (mapcat (partial walk (conj visited node) node)
-                          (children node))
-                  [[::node node]]
-                  (when from [[::edge from node]])
-                  )))]
-    (walk #{} nil root)))
+  ([adj] (fix-adj adj (keys adj)))
+  ([adj roots]
+   (let [sconcat (comp set concat)
+         sconj   (comp set conj)
+         seen (volatile! #{})
+         under (volatile! {})
+         dfs (fn dfs [path x]
+               (when-not (contains? path x)
+                 (if (@seen x)
+                   ;; we have already fully traversed under x
+                   ;; so we can reuse its answer, in case diamond
+                   (doseq [p path]
+                     (let [under-x (@under x)]
+                       (vswap! under update p sconcat
+                               under-x (list x))))
 
-;; TODO this does not work exactly right when there is a diamond in the graph
-
-(defn- count-up
-  "On a graph starting at `root`, with adjacency given by `children`,
-  produce a map from nodes and edges to reducing (f x) with r, where xs are the
-  children of that node or edge.
-
-  For example
-
-  (count-up :a {:a [:b] :b [:c :d]} (constantly 1) +)
-   => {:a 4 :b 3 :c 1, :d 1, ;; count of subtree rooted at node
-       [:b :c] 1, [:b :d] 1, [:a :b] 3 ;; count of subtree reachable through edge
-      }
-  "
-  [root children f r]
-  (reduce
-   (fn [acc item]
-     (case (first item)
-       ::edge (assoc acc (vec (rest item)) (get acc (nth item 2)))
-       ::loop acc
-       ::node (let [x (second item)]
-                (assoc acc x
-                       (reduce r (cons (f x) (for [c (children x)] (get acc c 0))))))))
-   {} (postorder children root)))
+                   ;; we need to traverse under x
+                   (do (doseq [a (adj x)] (dfs (conj path x) a))
+                       (doseq [p path] (vswap! under update p sconj x))
+                       (vswap! seen conj x)))))
+         ]
+     (doseq [k roots] (dfs #{} k))
+     @under)))
 
 (defn- truthy [v] (or (= true v) (and (number? v) (> v 0.5))))
 
@@ -602,6 +592,8 @@
                                                           ))
                                              a)))))
 
+
+        arcs-in (set arcs-in)
         
         dvin? (let [dvin (-> mip :vars :DVIN :value)]
                 (fn [x] (truthy (get dvin x))))
@@ -619,19 +611,38 @@
         max-0 #(max (or %1 0) (or %2 0))
 
         vtx-map (::vtx-map mip)
+
+        reachability (fix-adj adj roots)
+
+        count-from-vertex
+        (let [vcount #(if (dvin? %)
+                        (-> vtx-map (get %) :demand (:count 1)) 0)
+              result (reduce-kv
+                      (fn [a v vs]
+                        ;; v is a vertex and vs is all below verts.
+                        ;; so we want to output v : on any arc /into/ v
+                        (assoc a v (reduce + (vcount v) (map vcount vs))))
+                      {} reachability)
+              ]
+          (fn [x]
+            (or (result x)
+                (vcount x) ;; for terminal vertices
+                0)))
+
+        max-peak-from-vertex
+        (let [vpeak #(if (dvin? %)
+                       (-> vtx-map (get %) :demand (:kwp 0)) 0)
+              result (reduce-kv
+                      (fn [a v vs]
+                        ;; v is a vertex and vs is all below verts.
+                        ;; so we want to output v : on any arc /into/ v
+                        (assoc a v (reduce max (vpeak v) (map vpeak vs))))
+                      {} reachability)
+              ]
+          (fn [x] (or (result x)
+                      (vpeak x)
+                      0)))
         
-        edge-counts                   ; the number of proper demands
-                                        ; reachable through each edge
-        (apply merge-with max-0
-               (for [s roots]
-                 (count-up s adj #(if (dvin? %)
-                                    (-> vtx-map (get %) :demand (:count 1)) 0) +)))
-
-        edge-max-peak-flow            ; the largest individual peak
-                                        ; demand through each edge
-        (apply merge-with max-0
-               (for [s roots] (count-up s adj #(-> vtx-map (get %) :demand (:kwp 0)) max)))
-
         flow-kw (-> mip :vars :ARC-FLOW-KW :value)
         edge-loss-kw (::edge-loss mip) ;; a function, worked out before
         
@@ -640,20 +651,13 @@
                                         ; together
         (->>
          (for [e (::edge mip)]
-           (let [count-a (get edge-counts e)
-                 count-b (get edge-counts (rev-edge e))
-
-                 max-peak-a (get edge-max-peak-flow e)
-                 max-peak-b (get edge-max-peak-flow (rev-edge e))
-
-                 count    (or count-a count-b 0)
-                 max-peak (or max-peak-a max-peak-b 0)
+           (let [a (or (arcs-in e) (arcs-in (rev-edge e))) ;; we should only have one arc in per edge
+                 
+                 count    (count-from-vertex (second a))
+                 max-peak (max-peak-from-vertex (second a))
 
                  diversity (diversity-factor count)
-                 undiversified-flow (max
-                                     (get flow-kw [e :peak] 0)
-                                     (get flow-kw [(rev-edge e) :peak] 0))
-
+                 undiversified-flow (get flow-kw [a :peak] 0)
                  diversified-flow (* diversity undiversified-flow)
                  
                  diversity              ; This fixes a mistake where
@@ -666,18 +670,18 @@
                    (if (zero? max-peak) 1.0
                        (/ max-peak undiversified-flow))
                    diversity)
-
+                 
                  diversified-flow (* diversity undiversified-flow)
                  
                  heat-loss (edge-loss-kw e diversified-flow)
                  ]
              [e [diversity heat-loss]]))
-         (into {}))
-        ]
+         (into {}))]
+    
     {:edge-diversity    (into {} (for [[e [d]] edge-parameters] [e d]))
      :edge-losses       (into {} (for [[e [_ l]] edge-parameters] [e l]))
      :supply-diversity  (into {} (for [s (::svtx mip)]
-                                   [s (diversity-factor (get edge-counts s 0.0))]))
+                                   [s (diversity-factor (count-from-vertex s))]))
      }))
 
 (defn- parameterise
@@ -988,6 +992,25 @@
 
   (def junk (output-solution nil -last-solution nil nil ))
 
+  (def mip (construct-mip -last-problem))
+  (run-model (assoc -last-problem :flow-bound-slack 1.5))
+
+  (scip/minuc mip)
+  (def b (bounds/compute-bounds -last-problem))
+
+  (with-open [w (io/writer "/home/hinton/tmp/main.dot")]
+    (binding [*out* w]
+      (println "digraph G {")
+      (doseq [[[a b] {:keys [peak-max]}] (:bounds -last-problem)]
+        (when-not (zero? peak-max)
+          (println (format "\"%s\" -> \"%s\" [label=\"%.3g\"];" a b peak-max))
+          )
+        )
+      (println "}")
+      )
+    )
+  
+  
   (def soln
     (binding [lp.io/*keep-temp-dir* true]
       (run-model -last-problem)
