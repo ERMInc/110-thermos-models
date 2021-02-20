@@ -1,7 +1,8 @@
 (ns thermos.opt.supply.profiles
   "Use scale-to-fit to adjust a profile shape so it has a given AUC and peak"
   (:require [clojure.spec.alpha :as s]
-            [ghostwheel.core :refer [>defn >defn- => |]]))
+            [ghostwheel.core :refer [>defn >defn- => |]]
+            [clojure.tools.logging :as log]))
 
 (s/def ::values-profile
   (s/coll-of
@@ -126,6 +127,20 @@
         zero           (for [d day-type-order]
                          (vec (repeat (day-type-length d) 0)))
 
+        demands (keep
+                 (fn [{:keys [kwp kwh] :as d}]
+                   (cond
+                     (and (zero? kwp) (zero? kwh))
+                     (do
+                       (log/warn "Removing zero input building")
+                       nil)      ;; remove zero peak buildings
+                     (< (* 8760 kwp) kwh) ;; amplify inverted buildings
+                     (do (log/warn "Input building has lower peak than baseload - increase peak"
+                                   kwp kwh)
+                         (assoc d :kwp (/ kwh 8760.0)))
+                     :else d))
+                 demands)
+        
         combined-profile ;; [[double]]
         (reduce
          (fn [acc {pr :profile kwh :kwh kwp :kwp}]
