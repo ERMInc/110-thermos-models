@@ -8,7 +8,8 @@
             [thermos.opt.net.specs :refer [network-problem]]
             [clojure.spec.alpha :as spec]
             [thermos.opt.net.diversity :refer [diversity-factor]]
-            [thermos.opt.net.bounds :as bounds]))
+            [thermos.opt.net.bounds :as bounds]
+            [thermos.opt.net.graph :as graph]))
 
 (def ^:const hours-per-year (* 24.0 365))
 
@@ -542,37 +543,6 @@
      ::vtx-map vertices
      }))
 
-(defn- fix-adj
-  "Compute the fixed point of adj under itself. Return a map like adj but
-  where every vertex maps to all vertices reachable from it, rather than just its edges.
-
-  Invoked with `roots` it only computes values for things reachable
-  from roots, which makes it a bit quicker.
-  "
-  ([adj] (fix-adj adj (keys adj)))
-  ([adj roots]
-   (let [sconcat (comp set concat)
-         sconj   (comp set conj)
-         seen (volatile! #{})
-         under (volatile! {})
-         dfs (fn dfs [path x]
-               (when-not (contains? path x)
-                 (if (@seen x)
-                   ;; we have already fully traversed under x
-                   ;; so we can reuse its answer, in case diamond
-                   (doseq [p path]
-                     (let [under-x (@under x)]
-                       (vswap! under update p sconcat
-                               under-x (list x))))
-
-                   ;; we need to traverse under x
-                   (do (doseq [a (adj x)] (dfs (conj path x) a))
-                       (doseq [p path] (vswap! under update p sconj x))
-                       (vswap! seen conj x)))))
-         ]
-     (doseq [k roots] (dfs #{} k))
-     @under)))
-
 (defn- truthy [v] (or (= true v) (and (number? v) (> v 0.5))))
 
 (defn- compute-parameters
@@ -612,7 +582,7 @@
 
         vtx-map (::vtx-map mip)
 
-        reachability (fix-adj adj roots)
+        reachability (graph/close-adjacency-map adj roots)
 
         count-from-vertex
         (let [vcount #(if (dvin? %)
