@@ -185,6 +185,29 @@
       solution
       )))
 
+(defn pmap-n
+  "Like map, except f is applied in parallel. Semi-lazy in that the
+  parallel computation stays ahead of the consumption, but doesn't
+  realize the entire result unless required. Only useful for
+  computationally intensive functions where the time of f dominates
+  the coordination overhead."
+
+  ([n f coll]
+   (let [rets (map #(future (f %)) coll)
+         step (fn step [[x & xs :as vs] fs]
+                (lazy-seq
+                 (if-let [s (seq fs)]
+                   (cons (deref x) (step xs (rest s)))
+                   (map deref vs))))]
+     (step rets (drop n rets))))
+  ([n f coll & colls]
+   (let [step (fn step [cs]
+                (lazy-seq
+                 (let [ss (map seq cs)]
+                   (when (every? identity ss)
+                     (cons (map first ss) (step (map rest ss)))))))]
+     (pmap #(apply f %) (step (cons coll colls))))))
+
 (defn compute-bounds
   "Problem is a network model problem, as defined by the specs adjacent.
   
@@ -223,6 +246,7 @@
   but they are unidirectional for heat.
   "
   [problem]
+  
   (let [vertices  (vertex-information problem)
         adjacency (make-adjacency problem vertices)
         inverse   (graph/invert-adjacency-map adjacency)
@@ -255,21 +279,23 @@
                               (set))
         
         bridges    (concat internal-bridges connectors anti-connectors)
-        
-        bridge-bounds (reduce
-                       (fn [a [i j]]
-                         (let [adjacency (-> adjacency (update i disj j) (update j disj i))
-                               inverse   (-> inverse (update i disj j) (update j disj i))]
-                           (assoc a
-                                  [i j] (if (contains? anti-connectors [i j])
+        parallelism (min 4 (.availableProcessors (Runtime/getRuntime)))
+
+        bridge-bounds (->> (pmap-n
+                            parallelism
+                            (fn [[i j]]
+                              (let [adjacency (-> adjacency (update i disj j) (update j disj i))
+                                    inverse   (-> inverse (update i disj j) (update j disj i))]
+                                [[[i j] (if (contains? anti-connectors [i j])
                                           NOTHING
                                           (single-edge-bounds (graph/reachable-from inverse #{i})
-                                                              (graph/reachable-from adjacency #{j})))
-                                  [j i] (if (contains? anti-connectors [j i])
+                                                              (graph/reachable-from adjacency #{j})))]
+                                 [[j i] (if (contains? anti-connectors [j i])
                                           NOTHING
                                           (single-edge-bounds (graph/reachable-from inverse #{j})
-                                                              (graph/reachable-from adjacency #{i}))))))
-                       {} bridges)
+                                                              (graph/reachable-from adjacency #{i})))]]))
+                            bridges)
+                           (reduce (fn [a es] (into a es)) {}))
         
         ;; a version of adjacency with all bridges removed
         components (reduce
@@ -283,7 +309,7 @@
         ;; if the theory is that for each such edge the answer is the same rather than thinking hard
         ;; we can just do it once and find out. Forward and reverse should be same as well?
 
-        component-bounds (volatile! {})
+        component-bounds (atom {})
 
         _ (log/info "Flow bounds for" (count internal-bridges) "internal bridges,"
                     (count connectors) "connectors,"
@@ -294,23 +320,26 @@
 
         result
         (->> (:edges problem) (mapcat (juxt (juxt :i :j) (juxt :j :i)))
-             (reduce
-              (fn [out [i j]]
-                (if-let [x (or (bridge-bounds [i j]) (@component-bounds [i j]))]
-                  (assoc out [i j] x)
-                  (let [ci (component-labels i)
-                        cj (or (component-labels j) ci)
-                        ci (or ci cj)]
-                    (assert (= ci cj) "Edge should be within component")
-                    (let [adjacency (-> adjacency (update i disj j) (update j disj i))
-                          inverse   (-> inverse (update i disj j) (update j disj i))
-                          result    (single-edge-bounds (graph/reachable-from inverse #{j})
-                                                        (graph/reachable-from adjacency #{i}))]
-                      (vswap! component-bounds assoc (or ci cj) result)
-                      (assoc out [i j] result)))
-                  ))
-              {}))
-
+             (pmap-n
+              parallelism
+              (fn [[i j]]
+                [[i j]
+                 (if-let [x (or (bridge-bounds [i j]) (@component-bounds [i j]))]
+                   x
+                   
+                   (let [ci (component-labels i)
+                         cj (or (component-labels j) ci)
+                         ci (or ci cj)]
+                     (assert (= ci cj) "Edge should be within component")
+                     (let [adjacency (-> adjacency (update i disj j) (update j disj i))
+                           inverse   (-> inverse (update i disj j) (update j disj i))
+                           result    (single-edge-bounds (graph/reachable-from inverse #{j})
+                                                         (graph/reachable-from adjacency #{i}))]
+                       (swap! component-bounds assoc (or ci cj) result)
+                       result))
+                   )]))
+             (into {}))
+        
         #_#_ old-result (compute-bounds-old problem)
         ]
 
@@ -341,3 +370,9 @@
     result
     ))
 
+
+
+(comment
+  (time (let [_ (compute-bounds -last-input)]))
+  (time (let [_ (compute-bounds-old -last-input)]))
+  )
