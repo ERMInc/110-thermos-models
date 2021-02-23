@@ -551,6 +551,8 @@
   [mip]
   (let [diversity-factor (::diversity mip) ; Get hold of diversity function
 
+        diversity-limit (diversity-factor 100000)
+        
         flow-kw (-> mip :vars :ARC-FLOW-KW :value)
         ;; Find which arcs went into the solution
         arcs-in (-> mip :vars :AIN :value
@@ -615,6 +617,8 @@
         
         flow-kw (-> mip :vars :ARC-FLOW-KW :value)
         edge-loss-kw (::edge-loss mip) ;; a function, worked out before
+
+        n-diamonds (volatile! 0)
         
         edge-parameters                 ; For edges, losses &
                                         ; diversity worked out
@@ -640,13 +644,22 @@
                    (if (zero? max-peak) 1.0
                        (/ max-peak undiversified-flow))
                    diversity)
+
+                 diamond? (not (<= diversity-limit diversity 1.0))
+                 
+                 diversity (max diversity-limit (min diversity 1.0))
                  
                  diversified-flow (* diversity undiversified-flow)
                  
                  heat-loss (edge-loss-kw e diversified-flow)
                  ]
+             (when diamond? (vswap! n-diamonds inc))
              [e [diversity heat-loss]]))
-         (into {}))]
+         (into {}))
+        ]
+
+    (when (pos? @n-diamonds)
+      (log/warn @n-diamonds "edges involved in a diamond - diversity estimation simplified for these"))
     
     {:edge-diversity    (into {} (for [[e [d]] edge-parameters] [e d]))
      :edge-losses       (into {} (for [[e [_ l]] edge-parameters] [e l]))
