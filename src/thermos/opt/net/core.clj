@@ -645,7 +645,7 @@
                        (/ max-peak undiversified-flow))
                    diversity)
 
-                 diamond? (not (<= diversity-limit diversity 1.0))
+                 diamond? (not (<= diversity-limit diversity 1.001))
                  
                  diversity (max diversity-limit (min diversity 1.0))
                  
