@@ -116,13 +116,34 @@
         (fn [e] (let [e (get arc-map e)]
                   (if e (* (:length e 0) (get e :cost%kwm 0)) 0)))
 
-        supply-max-capacity (fn [i] (or (-> (vertices i) :supply :capacity-kw) 0))
+        neighbours          (into {} (for [[i ijs] (group-by first arc)]
+                                        [i (set (map second ijs))]))
+
+        ;; we can restrict supply capacity a bit using the flow bounds
+        ;; which can't hurt model efficiency since it is used as a big
+        ;; M we use undiversified flow because it's used as big M on
+        ;; undiversified capacity.
+        supply-max-capacity
+        (let [supply-bounds
+              (reduce
+               (fn [a k]
+                 (let [summed-flow-bounds
+                       (reduce + (demand-kwp k)
+                               (for [n (neighbours k)]
+                                 (-> flow-bounds (get [k n]) :peak-max (or 0))))
+                       flow-bound (* flow-bound-slack summed-flow-bounds)
+                       given-capacity (-> (vertices k) :supply :capacity-kw (or 0))]
+                   (assoc a k (min flow-bound given-capacity))))
+               {} svtx)]
+          (fn [i] (or (get supply-bounds i) 0)))
+        
         supply-fixed-cost   (fn [i] (or (-> (vertices i) :supply :cost) 0))
         supply-cost-per-kwh (fn [i] (or (-> (vertices i) :supply (get :cost%kwh)) 0))
         supply-cost-per-kwp (fn [i] (or (-> (vertices i) :supply (get :cost%kwp)) 0))
         supply-emissions-per-kw (fn [i e]
                                   (* (or (-> (vertices i) :suppy :emissions (get e)) 0)
                                      hours-per-year))
+        supply-count-max         (:supply-limit problem)
         
 
         vertex-fixed-value   (fn [i] (or (-> (vertices i) :demand :value) 0))
@@ -135,11 +156,6 @@
                                        (-> (vertices i) :demand (:count 1))
                                        0))
         
-        neighbours (into {} (for [[i ijs] (group-by first arc)]
-                              [i (set (map second ijs))]))
-        
-        supply-count-max         (:supply-limit problem)
-
         emissions-cost-per-kg    (fn [e] (or (-> (emissions e) :cost) 0))
         emissions-limit          (fn [e] (-> (emissions e) :limit))
 
@@ -397,8 +413,9 @@
          [>= [:SUPPLY-CAP-KW i]   [* [:SUPPLY-KW i :peak] [:SUPPLY-DIVERSITY i]]]
          [>= [:SUPPLY-CAP-KW i]   [:SUPPLY-KW i :mean]]
          [<= [:SUPPLY-CAP-KW i]   [* [:SVIN i] (supply-max-capacity i)]]
-         ;; TODO these two _should_ be redundant but leaving them out seems to produce
-         ;; odd outcomes
+         ;; TODO these two _should_ be redundant but putting them in
+         ;; strengthens the bounds and makes model work better when
+         ;; supply-max-capacity is very large.
          [<= [:SUPPLY-KW i :peak] [* [:SVIN i] (supply-max-capacity i)]]
          [<= [:SUPPLY-KW i :mean] [* [:SVIN i] (supply-max-capacity i)]]
          
