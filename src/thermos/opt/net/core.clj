@@ -394,10 +394,15 @@
       ;; supply capacity sufficient
       (for [i svtx]
         [:and
-         [>= [:SUPPLY-CAP-KW i] [* [:SUPPLY-KW i :peak] [:SUPPLY-DIVERSITY i]]]
-         [>= [:SUPPLY-CAP-KW i] [:SUPPLY-KW i :mean]]
-         [<= [:SUPPLY-CAP-KW i] [* [:SVIN i] (supply-max-capacity i)]]
-         [<= [:SVIN i] [:SUPPLY-KW i :peak]]])
+         [>= [:SUPPLY-CAP-KW i]   [* [:SUPPLY-KW i :peak] [:SUPPLY-DIVERSITY i]]]
+         [>= [:SUPPLY-CAP-KW i]   [:SUPPLY-KW i :mean]]
+         [<= [:SUPPLY-CAP-KW i]   [* [:SVIN i] (supply-max-capacity i)]]
+         ;; TODO these two _should_ be redundant but leaving them out seems to produce
+         ;; odd outcomes
+         [<= [:SUPPLY-KW i :peak] [* [:SVIN i] (supply-max-capacity i)]]
+         [<= [:SUPPLY-KW i :mean] [* [:SVIN i] (supply-max-capacity i)]]
+         
+         [<= [:SVIN i]            [:SUPPLY-KW i :peak]]])
       
       ;; not too many supplies
       (when supply-count-max
@@ -761,6 +766,20 @@
         (> attempts 2)
         (do
           (log/error "A feasible free solution led to an infeasible fixed solution too many times. This probably means that the supply capacity is very marginal, and the optimiser can't work out whether to include or exclude a particular demand.")
+
+          (comment
+            (doseq [u (scip/minuc (fix-decisions sol-par))]
+              (log/info "UC:" u))
+            
+            (let [svtx (::svtx sol-par)]
+              (doseq [s svtx]
+                (println s "\t" "SVIN\t" (-> sol-free :vars :SVIN :value (get s)))
+                (println s "\t" "KWP\t"  (-> sol-free :vars :SUPPLY-KW :value (get [s :peak])))
+                (println s "\t" "KWA\t"  (-> sol-free :vars :SUPPLY-KW :value (get [s :mean])))
+                (println s "\t" "CAP\t"  (-> sol-free :vars :SUPPLY-CAP-KW :value (get s)))
+                (println s "\t" "D0\t"   (-> sol-free :vars :SUPPLY-DIVERSITY :value (get s)))
+                (println s "\t" "D1\t"   (-> sol-par  :vars :SUPPLY-DIVERSITY :value (get s))))))
+          
           sol-fix)
 
         (and (:exists (:solution sol-free)) (not (:exists (:solution sol-fix))))
