@@ -197,7 +197,7 @@
                (+ other-cost
                   ;; emissions costs have been rolled into
                   ;; present-price of fuel
-                  (/ (+ fuel-price (if chp (* (or ep 0) grid-offer) 0)) eh)))))
+                  (/ (- fuel-price (if chp (* (or ep 0) grid-offer) 0)) eh)))))
 
         store-fixed-cost
         (fn [s] (-> s storage-options :present-cost :fixed))
