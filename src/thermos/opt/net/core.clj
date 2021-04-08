@@ -945,12 +945,12 @@
                 (when dvin {:connected true})
                 (when svin {:capacity-kw (supply-capacity i)
                             :diversity (supply-diversity i)
-                            :output-kwh (* hours-per-year (supply-output [i :mean]))})
+                            :output-kwh (* hours-per-year (supply-output [i :mean] 0))})
                 (when has-insulation
                   {:insulation
                    (for [t ins-types
                          :let [kwh (get insulation [i t] 0)]
-                         :when (not (zero? kwh))]
+                         :when (and (number? kwh) (not (zero? kwh)))]
                      [t kwh])})
                 
                 (when has-alternative
