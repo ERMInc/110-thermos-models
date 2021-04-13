@@ -1,3 +1,6 @@
+;; This file is part of THERMOS, copyright © Centre for Sustainable Energy, 2017-2021
+;; Licensed under the Reciprocal Public License v1.5. See LICENSE for licensing details.
+
 (ns thermos.opt.net.bounds
   "Flow bounds calculation for network model problems"
   (:require [thermos.opt.net.diversity :refer [diversity-factor]]
