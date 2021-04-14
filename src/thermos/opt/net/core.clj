@@ -123,9 +123,9 @@
                                         [i (set (map second ijs))]))
 
         ;; we can restrict supply capacity a bit using the flow bounds
-        ;; which can't hurt model efficiency since it is used as a big
-        ;; M we use undiversified flow because it's used as big M on
-        ;; undiversified capacity.
+        ;; which can't hurt model efficiency. We use the diversified
+        ;; value but when using it as a big M on undiversified flow we
+        ;; divide by max diversity to slacken it off a bit.
         supply-max-capacity
         (let [supply-bounds
               (reduce
@@ -133,11 +133,13 @@
                  (let [summed-flow-bounds
                        (reduce + (demand-kwp k)
                                (for [n (neighbours k)]
-                                 (-> flow-bounds (get [k n]) :peak-max (or 0))))
+                                 (-> flow-bounds (get [k n]) :diverse-peak-max (or 0))))
                        flow-bound (* flow-bound-slack summed-flow-bounds)
-                       given-capacity (-> (vertices k) :supply :capacity-kw (or 0))]
+                       given-capacity (-> (vertices k) :supply :capacity-kw (or 0))
+                       ]
                    (assoc a k (min flow-bound given-capacity))))
                {} svtx)]
+
           (fn [i] (or (get supply-bounds i) 0)))
         
         supply-fixed-cost   (fn [i] (or (-> (vertices i) :supply :cost) 0))
@@ -419,8 +421,8 @@
          ;; TODO these two _should_ be redundant but putting them in
          ;; strengthens the bounds and makes model work better when
          ;; supply-max-capacity is very large.
-         [<= [:SUPPLY-KW i :peak] [* [:SVIN i] (supply-max-capacity i)]]
-         [<= [:SUPPLY-KW i :mean] [* [:SVIN i] (supply-max-capacity i)]]
+         [<= [:SUPPLY-KW i :peak] [* [:SVIN i] (/ (supply-max-capacity i) (diversity 1000.0))]]
+         [<= [:SUPPLY-KW i :mean] [* [:SVIN i] (/ (supply-max-capacity i) (diversity 1000.0))]]
          
          [<= [:SVIN i]            [:SUPPLY-KW i :peak]]])
       
@@ -1002,6 +1004,9 @@
     (log/info
      (format "%-4s%-8s%-8s%-8s%-3s%-10s%-6s%-6s%-12s%-7s%-7s"
              "N" "Tn" "T" "Tr" ">" "VALUE" "NV" "NE" "STATE" "δFIX%" "GAP%"))
+
+    (def -last-problem problem)
+    
     
     (loop [mip      mip ;; comes parameterised out of the gate
            seen     #{} ;; decision sets we have already seen
@@ -1100,7 +1105,7 @@
   (def junk (output-solution nil -last-solution nil nil ))
 
   (def mip (construct-mip -last-problem))
-  (run-model (assoc -last-problem :flow-bound-slack 1.5))
+  (run-model (assoc -last-problem :flow-bound-slack 2))
 
   (scip/minuc mip)
   (def b (bounds/compute-bounds -last-problem))
