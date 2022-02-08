@@ -146,7 +146,7 @@
         supply-cost-per-kwh (fn [i] (or (-> (vertices i) :supply (get :cost%kwh)) 0))
         supply-cost-per-kwp (fn [i] (or (-> (vertices i) :supply (get :cost%kwp)) 0))
         supply-emissions-per-kw (fn [i e]
-                                  (* (or (-> (vertices i) :suppy :emissions (get e)) 0)
+                                  (* (or (-> (vertices i) :supply :emissions (get e)) 0)
                                      hours-per-year))
         supply-count-max         (:supply-limit problem)
         
