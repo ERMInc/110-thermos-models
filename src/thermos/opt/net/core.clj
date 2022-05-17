@@ -548,15 +548,25 @@
        (not-empty ins-types)
        (merge
         ;; TODO restrict indices to valid combinations, since I can now
-        {:INSULATION-KWH {:type :non-negative :indexed-by [dvtx ins-types]
-                          :lower insulation-min-kwh
-                          :upper insulation-max-kwh}
-         :INSULATION-IN {:type :binary :indexed-by [dvtx ins-types]
-                         :value (fn [i it] (when-not (insulation-allowed i it) false))
-                         :fixed (fn [i it] (when-not (insulation-allowed i it) true))}
-         }
-        ))
-
+        (let [force-insulation (:force-insulation problem)
+              insulation-fixed (fn [i it]
+                                    (or (not (insulation-allowed i it)) force-insulation))
+              ]
+          {:INSULATION-KWH {:type :non-negative :indexed-by [dvtx ins-types]
+                            :lower insulation-min-kwh
+                            :upper insulation-max-kwh
+                            :value (fn [i it]
+                                     (cond
+                                       (not (insulation-allowed i it)) 0
+                                       force-insulation                (insulation-max-kwh i it)))
+                            :fixed insulation-fixed}
+           :INSULATION-IN {:type :binary :indexed-by [dvtx ins-types]
+                           :value (fn [i it]
+                                    (cond
+                                      (not (insulation-allowed i it)) false
+                                      force-insulation                true))
+                           :fixed insulation-fixed}})))
+     
      ;; OTHER JUNK, for use elsewhere.
      ::ins-types ins-types
      ::alt-types alt-types

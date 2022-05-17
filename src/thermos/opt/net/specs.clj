@@ -68,6 +68,8 @@
     (ds/opt :diversity-limit) number?
     (ds/opt :diversity-rate) number?
     (ds/opt :pipe-losses) {:kwp  [number?] :w%m [number?]}
+
+    (ds/opt :force-insulation) boolean?
     }
    
    )
