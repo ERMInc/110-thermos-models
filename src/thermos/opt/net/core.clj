@@ -860,7 +860,7 @@
    "heuristics/veclendiving/maxlpiterquot" "0.075"
    "heuristics/veclendiving/maxlpiterofs" "1500"
    "separating/flowcover/freq" "8"
-   "numerics/feastol" "1e-3"})
+   "numerics/feastol" "1e-4"})
 
 (defn- solve [mip & {:keys [mip-gap time-limit]}]
   (loop [attempts 0
