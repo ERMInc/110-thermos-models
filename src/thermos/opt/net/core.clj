@@ -860,13 +860,15 @@
    "heuristics/veclendiving/maxlpiterquot" "0.075"
    "heuristics/veclendiving/maxlpiterofs" "1500"
    "separating/flowcover/freq" "8"
-   "numerics/feastol" "1e-4"})
+   "numerics/feastol" "1e-3"})
 
-(defn- solve [mip & {:keys [mip-gap time-limit]}]
+(defn- solve [mip & {:keys [mip-gap time-limit adjust-feastol]}]
   (loop [attempts 0
-         mip      mip]
+         mip      mip
+         feastol  (get scip-settings "numerics/feastol")]
     (let [sol-free (scip/solve* mip
                                 (assoc scip-settings
+                                       "numerics/feastol" feastol
                                        :time-limit time-limit
                                        :mip-gap mip-gap))
 
@@ -880,6 +882,14 @@
                     sol-free)
           ]
       (cond
+        (and (not (:exists (:solution sol-free)))
+             (= :infeasible (:reason (:solution sol-free)))
+             adjust-feastol
+             (= feastol "1e-3"))
+        (do
+          (log/warn "Reducing feasibility tolerance due to infeasible solution")
+          (recur attempts mip "1e-4"))
+        
         (> attempts 2)
         (do
           (log/error "A feasible free solution led to an infeasible fixed solution too many times. This probably means that the supply capacity is very marginal, and the optimiser can't work out whether to include or exclude a particular demand.")
@@ -900,7 +910,7 @@
           sol-fix)
 
         (and (:exists (:solution sol-free)) (not (:exists (:solution sol-fix))))
-        (recur (inc attempts) sol-par)
+        (recur (inc attempts) sol-par feastol)
         
         :else
         (let [stable
@@ -1002,10 +1012,11 @@
   (log/info "Solving network problem")
   (let [mip             (construct-mip problem)
         _               (log/info "Constructed MIP")
-        iteration-limit (:iteration-limit problem 1000)
-        time-limit      (:time-limit problem 1.0)
-        mip-gap         (:mip-gap problem 0.05)
-        param-fix-gap   (:param-gap problem 0)
+        iteration-limit    (:iteration-limit problem 1000)
+        time-limit         (:time-limit problem 1.0)
+        mip-gap            (:mip-gap problem 0.05)
+        param-fix-gap      (:param-gap problem 0)
+        should-be-feasible (:should-be-feasible problem false)
         
         start-time      (System/currentTimeMillis)
         end-time (+ (* time-limit 1000 3600) start-time)
@@ -1027,6 +1038,7 @@
       (let [iteration-start (System/currentTimeMillis)
 
             solved-mip (solve mip
+                              :adjust-feastol should-be-feasible
                               :mip-gap mip-gap
                               :time-limit
                               (max 60 (/ (- end-time iteration-start) 1000.0)))
