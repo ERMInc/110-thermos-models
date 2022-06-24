@@ -439,7 +439,9 @@
         [<= [+ (for [i svtx] [:SVIN i])] supply-count-max])
 
       ;; only one supply from each exclusive supply group
-      (for [[_ vs] exclusive-supply-groups :when (seq vs)]
+      ;; the :when is (seq (rest vs)) because an exclusive group
+      ;; of 1 doesn't require a constraint
+      (for [[_ vs] exclusive-supply-groups :when (seq (rest vs))]
         [<= [+ (for [i vs] [:SVIN i])] 1])
       
       ;; emissions limits
