@@ -51,6 +51,9 @@
        (ds/opt :cost%kwh) number?
        (ds/opt :cost%kwp) number?
        (ds/opt :emissions) {any? number?}
+
+       ;; only one supply from each exclusive group may be used.
+       (ds/opt :exclusive-groups) #{any?}
        }
       }]
     
@@ -70,6 +73,7 @@
     (ds/opt :pipe-losses) {:kwp  [number?] :w%m [number?]}
 
     (ds/opt :force-insulation) boolean?
+    (ds/opt :supply-limit) (ds/maybe integer?)
     }
    
    )

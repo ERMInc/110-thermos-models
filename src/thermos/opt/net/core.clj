@@ -351,6 +351,14 @@
         total-count (reduce + (map #(:count (:demand %) 1) (filter :demand (:vertices problem))))
         
         initial-supply-diversity (diversity total-count)
+
+        exclusive-supply-groups
+        (reduce
+         (fn [a vid]
+           (->> (-> vertices (get vid) :supply :exclusive-groups)
+                (reduce (fn [a g] (update a g conj vid)) a)))
+         {}
+         svtx)
         ]
     {:maximize 
      [- total-connection-value
@@ -430,6 +438,10 @@
       (when supply-count-max
         [<= [+ (for [i svtx] [:SVIN i])] supply-count-max])
 
+      ;; only one supply from each exclusive supply group
+      (for [[_ vs] exclusive-supply-groups :when (seq vs)]
+        [<= [+ (for [i vs] [:SVIN i])] 1])
+      
       ;; emissions limits
       (for [e emission
             :let [lim (emissions-limit e)] :when lim]
