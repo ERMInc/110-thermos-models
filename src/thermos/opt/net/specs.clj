@@ -53,7 +53,7 @@
        (ds/opt :emissions) {any? number?}
 
        ;; only one supply from each exclusive group may be used.
-       (ds/opt :exclusive-groups) #{any?}
+       ;; (ds/opt :exclusive-groups) (ds/maybe #{any?})
        }
       }]
     
