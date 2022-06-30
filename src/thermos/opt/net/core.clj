@@ -902,7 +902,7 @@
              (= feastol "1e-3"))
         (do
           (log/warn "Reducing feasibility tolerance due to infeasible solution")
-          (recur attempts mip "1e-4"))
+          (recur attempts mip "1e-5"))
         
         (> attempts 2)
         (do
