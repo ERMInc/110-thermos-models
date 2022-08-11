@@ -30,6 +30,11 @@
        ;; Group equivalence is determined by =
        ;; No demand can be in two groups, WLOG.
        (ds/opt :group) any?
+
+       ;; relates to connection targets below for some reason this
+       ;; breaks the spec and I don't have time to work out why RN
+       
+       ;; (ds/opt :infill-connection-targets) #{any?}
        
        (ds/opt :insulation)
        [{:id any?
@@ -74,6 +79,8 @@
 
     (ds/opt :force-insulation) boolean?
     (ds/opt :supply-limit) (ds/maybe integer?)
+    ;; define ranges for connection targets
+    ;; (ds/opt :infill-connection-targets) {any? (ds/tuple number? number?)}
     }
    
    )
