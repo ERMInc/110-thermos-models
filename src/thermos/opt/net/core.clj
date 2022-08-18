@@ -1025,7 +1025,8 @@
        :solver    (assoc solution
                          :objectives objective-values
                          :iterations iters)})
-    {:state (:reason solution)}))
+    {:state (:reason solution)
+     :error (:error solution)}))
 
 
 (defn- human-time [msec]
