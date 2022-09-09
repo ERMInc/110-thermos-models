@@ -14,6 +14,10 @@
             [thermos.opt.net.bounds :as bounds]
             [thermos.opt.net.graph :as graph]))
 
+(let [env (into {} (System/getenv))]
+  (def initial-feastol (or (env "THERMOS_INITIAL_FEASTOL") "1e-3"))
+  (def retry-feastol   (or (env "THERMOS_RETRY_FEASTOL")   "1e-6")))
+
 (def ^:const hours-per-year (* 24.0 365))
 
 (def ^:const years-per-hour (/ 1.0 hours-per-year))
@@ -895,7 +899,7 @@
    "heuristics/veclendiving/maxlpiterquot" "0.075"
    "heuristics/veclendiving/maxlpiterofs" "1500"
    "separating/flowcover/freq" "8"
-   "numerics/feastol" "1e-3"})
+   "numerics/feastol" initial-feastol})
 
 (defn- solve [mip & {:keys [mip-gap time-limit adjust-feastol]}]
   (loop [attempts 0
@@ -920,10 +924,11 @@
         (and (not (:exists (:solution sol-free)))
              (= :infeasible (:reason (:solution sol-free)))
              adjust-feastol
-             (= feastol "1e-3"))
+             (= feastol initial-feastol))
         (do
-          (log/warn "Reducing feasibility tolerance due to infeasible solution")
-          (recur attempts mip "1e-5"))
+          (log/warnf "Unexpectedly infeasible (tol=%s); retry tol=%s"
+                     feastol retry-feastol)
+          (recur attempts mip retry-feastol))
         
         (> attempts 2)
         (do
