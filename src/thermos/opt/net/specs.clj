@@ -16,7 +16,9 @@
       {:kwh number?
        :kwp number?
 
+       ;; these two form a tristate; both-true is invalid
        (ds/opt :required) boolean?
+       (ds/opt :off-network) boolean?
 
        ;; value of connecting
        (ds/opt :value) number?

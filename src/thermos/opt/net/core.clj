@@ -112,8 +112,12 @@
         demand-kwp (fn [i] (or (-> vertices (get i) :demand :kwp) 0))
         demand-kwh (fn [i] (or (-> vertices (get i) :demand :kwh) 0))
 
-        demand-is-required
+        demand-connection-value
         (fn [i] (boolean (-> vertices (get i) :demand :required)))
+
+        demand-connection-fixed
+        (fn [i] (or (boolean (-> vertices (get i) :demand :required))
+                    (boolean (-> vertices (get i) :demand :off-network))))
 
         edge-fixed-cost
         (fn [e] (let [e (get arc-map e)]
@@ -556,8 +560,8 @@
           ;; VARIABLES
           
           :DVIN {:type :binary :indexed-by [dvtx]
-                 :value demand-is-required
-                 :fixed demand-is-required}
+                 :value demand-connection-value
+                 :fixed demand-connection-fixed}
           
           :AIN  {:type :binary :indexed-by [arc]}
           :SVIN {:type :binary :indexed-by [svtx]}
