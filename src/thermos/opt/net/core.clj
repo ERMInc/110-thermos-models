@@ -954,7 +954,7 @@
           sol-fix)
 
         (and (:exists (:solution sol-free)) (not (:exists (:solution sol-fix))))
-        (recur (inc attempts) sol-par feastol)
+        (recur (inc attempts) sol-par retry-feastol)
         
         :else
         (let [stable
