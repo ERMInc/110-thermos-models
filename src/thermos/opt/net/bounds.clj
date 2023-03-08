@@ -333,7 +333,11 @@
                    (let [ci (component-labels i)
                          cj (or (component-labels j) ci)
                          ci (or ci cj)]
-                     (assert (= ci cj) "Edge should be within component")
+                     (assert (= ci cj) (str "Edge should be within component"
+                                            " ci: " ci
+                                            " cj: " cj
+                                            " i: " i
+                                            " j: " j))
                      (let [adjacency (-> adjacency (update i disj j) (update j disj i))
                            inverse   (-> inverse (update i disj j) (update j disj i))
                            result    (single-edge-bounds (graph/reachable-from inverse #{j})
