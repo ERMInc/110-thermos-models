@@ -8,8 +8,6 @@
             [clojure.tools.logging :as log]
             [clojure.set :as set]))
 
-
-
 (defn nzmin "Minimum of x and y which is not zero" [x y]
   (cond (zero? x) y
         (zero? y) x
@@ -69,6 +67,13 @@
   {:count-min  0 :peak-min   0 :mean-min 0
    :count-max  0 :peak-max   0 :mean-max 0
    :diverse-peak-min 0 :diverse-peak-max 0})
+
+
+(def LOTS
+  "The bounds for an arc where we can't find bounds"
+  {:count-min  0     :peak-min   0 :mean-min 0
+   :count-max  10000 :peak-max   1e8 :mean-max 1e8
+   :diverse-peak-min 0 :diverse-peak-max 1e8})
 
 (defn- single-edge-bounds
   "Compute the bounds for a single edge based on what it bridges.
@@ -312,69 +317,39 @@
         ;; if the theory is that for each such edge the answer is the same rather than thinking hard
         ;; we can just do it once and find out. Forward and reverse should be same as well?
 
-        component-bounds (atom {})
-
-        _ (log/info "Flow bounds for" (count internal-bridges) "internal bridges,"
+        component-bounds
+        (let [a (atom {})]
+          (fn [ci i j]
+            (or (@a ci)
+                (let [adjacency (-> adjacency (update i disj j) (update j disj i))
+                      inverse   (-> inverse (update i disj j) (update j disj i))
+                      result    (single-edge-bounds (graph/reachable-from inverse #{j})
+                                                    (graph/reachable-from adjacency #{i}))]
+                  (swap! a assoc ci result)
+                  result))))]
+    
+    (log/info "Flow bounds for" (count internal-bridges) "internal bridges,"
                     (count connectors) "connectors,"
                     (count (set (vals component-labels))) "components,"
-                    (count (:edges problem)) "edges total"
-                    )
-
-
-        result
-        (->> (:edges problem) (mapcat (juxt (juxt :i :j) (juxt :j :i)))
+                    (count (:edges problem)) "edges total")
+    
+    (->> (:edges problem) (mapcat (juxt (juxt :i :j) (juxt :j :i)))
              (pmap-n
               parallelism
               (fn [[i j]]
                 [[i j]
-                 (if-let [x (or (bridge-bounds [i j]) (@component-bounds [i j]))]
-                   x
-                   
-                   (let [ci (component-labels i)
-                         cj (or (component-labels j) ci)
-                         ci (or ci cj)]
-                     (assert (= ci cj) (str "Edge should be within component"
-                                            " ci: " ci
-                                            " cj: " cj
-                                            " i: " i
-                                            " j: " j))
-                     (let [adjacency (-> adjacency (update i disj j) (update j disj i))
-                           inverse   (-> inverse (update i disj j) (update j disj i))
-                           result    (single-edge-bounds (graph/reachable-from inverse #{j})
-                                                         (graph/reachable-from adjacency #{i}))]
-                       (swap! component-bounds assoc (or ci cj) result)
-                       result))
-                   )]))
+                 (or (bridge-bounds [i j])
+                     (let [ci (component-labels i)
+                           cj (or (component-labels j) ci)
+                           ci (or ci cj)]
+                       (if (= ci cj)
+                         (component-bounds ci i j)
+
+                         (do (log/warnf "Edge unexpectedly crosses components %s %s" i j)
+                             LOTS
+                             ))))
+                 ]))
              (into {}))
-        
-        #_#_ old-result (compute-bounds-old problem)
-        ]
-
-    #_ (when (not= old-result result)
-      (log/error "bounds differ!")
-      (doseq [a (keys old-result)]
-        (when-not (= (old-result a) (result a))
-          (cond (and (contains? anti-connectors a) (= NOTHING (result a)))
-                ;; (log/warn a "anti-connector disallowed as it should be...")
-                (do)
-
-                (= NOTHING (result a))
-                
-                (let [[i j] a]
-                  (log/error a "path forbidden" (old-result a)
-                             (contains? connectors a)
-                             (contains? anti-connectors a)
-                             (contains? (set bridges) a)
-                             ))
-
-                :else
-                (do
-                  (log/warn "difference" a)
-                  (log/error "old" (if (= NOTHING (old-result a)) "NO" (old-result a)))
-                  (log/error "new" (if (= NOTHING (result a)) "NO" (result a))))
-                ))))
-
-    result
     ))
 
 
