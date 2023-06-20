@@ -12,7 +12,8 @@
             [clojure.spec.alpha :as spec]
             [thermos.opt.net.diversity :refer [diversity-factor]]
             [thermos.opt.net.bounds :as bounds]
-            [thermos.opt.net.graph :as graph]))
+            [thermos.opt.net.graph :as graph]
+            [clojure.set :as set]))
 
 (let [env (into {} (System/getenv))]
   (def initial-feastol (or (env "THERMOS_INITIAL_FEASTOL") "1e-3"))
@@ -57,6 +58,77 @@
       (log/error (spec/explain-str x y)))
     is-valid))
 
+(defn- interior-edge-fn
+  "Given the :edges from a problem, return a function
+  which will find the edges interior to a group of vertices.
+
+  This is a set of edges which must all be used if the vertices
+  are part of a group and the vertices are connected, so for
+  example all the connectors for that group.
+
+  In practice this implements a single case which is this:
+  
+        a    b   c
+        |    |   |
+  *1----2----3---4---5
+
+  In which it should return the two mid-parts.
+
+  The connectors will be tied to the group by a different
+  set of constraints.
+  "
+  [edges]
+  (let [adj (persistent!
+             (reduce
+              (fn [a {:keys [i j]}]
+                (assoc! a
+                        i (conj (get a i #{}) j)
+                        j (conj (get a j #{}) i)))
+              (transient {})
+              edges))]
+    (fn interior-edges [vertices]
+      (let [midpoints (map adj vertices)]
+        (when (= #{1} (set (map count midpoints)))
+          (let [midpoints (reduce into #{} midpoints)
+                edges (for [m midpoints
+                            n (adj m)
+                            :when (contains? midpoints n)
+                            ;; so we only get edges not arcs
+                            :when (neg? (compare m n))]
+                        [m n])]
+            ;; check edges forms a line?
+            (when (= midpoints (set (flatten edges)))
+              edges)
+            ))))))
+
+(comment
+  (let [ief (interior-edge-fn
+             [{:i 1 :j 2}
+              {:i 2 :j 3}
+              {:i 3 :j 4}
+              {:i 4 :j 5}
+              {:i 2 :j :a}
+              {:i 3 :j :b}
+              {:i 4 :j :c}])]
+    (ief #{:a :b :c})))
+
+(defn- edges-to-single-vertices
+  "Return a sequence of [[i j] k] tuples, where edge [i j] is in arc and
+  k is a member of dvtx. The edges returned are those which can only reach
+  the given vertex k, when starting at members of svtx"
+  [arc svtx dvtx]
+  (let [adj (reduce
+             (fn [a [i j]] (assoc a i (conj (get a i #{}) j)))
+             {}
+             arc)
+        rt (graph/reachable-through adj svtx)]
+    ;; rt maps edges to sets of vertices reachable through edges
+    (for [[e ks] rt
+          :let [ks (set/intersection dvtx ks)]
+          :when (= 1 (count ks))]
+      [(as-edge e) (first ks)])))
+
+
 (defn construct-mip [problem]
   {:pre [(valid? network-problem problem)]}
 
@@ -96,6 +168,8 @@
                              (s/transform [s/MAP-VALS s/ALL] :id)
                              (map second)
                              (map set))
+
+        interior-edges (interior-edge-fn (:edges problem))
         
         alt-types  (set (mapcat (comp keys :alternatives :demand) (:vertices problem)))
         ins-types  (set (mapcat (comp keys :insulation :demand)   (:vertices problem)))
@@ -507,19 +581,28 @@
       ;; Grouped demands travel together
       (for [g grouped-demands :when (> (count g) 1)]
         [:= (for [i g] [:DVIN i])])
-      
-      ;; [:= [:DEBUG :pipe-cost] total-pipe-cost]
-      ;; [:= [:DEBUG :supply-cost] total-supply-cost]
-      ;; [:= [:DEBUG :connection-value] total-connection-value]
-      ;; (for [i dvtx t period]
-      ;;   [:= [:UNMET-DEMAND i t] (unmet-demand i t)
-         
-      ;;    ]
-      ;;   )
 
-      
+      ;; interior edges to groups travel together
+      (for [g grouped-demands :when (> (count g) 1)]
+        [:= (for [e (interior-edges g)] [:+ [:AIN e] [:AIN (rev-edge e)]])])
+
+      ;; interior edges to groups are on if groups are on
+      (for [g grouped-demands :when (> (count g) 1)
+            v g]
+        [:>=
+         (for [e (interior-edges g)]
+           [:+ [:AIN e] [:AIN (rev-edge e)]])
+         [:DVIN v]])
+
+      ;; paths that reach only to a single vertex are off if the vertex is off
+      ;; note that they are not on if the vertex is on, because it might be a diamond.
+      (for [[edge demand] (edges-to-single-vertices arc svtx dvtx)
+            :when (not (contains? svtx demand))]
+        [:<=
+         [:+ [:AIN edge] [:AIN (rev-edge edge)]]
+         [:DVIN demand]])
+
       )
-
      
      :vars
      (cond->
@@ -932,6 +1015,7 @@
         (do
           (log/warnf "Unexpectedly infeasible (tol=%s); retry tol=%s"
                      feastol retry-feastol)
+          
           (recur attempts mip retry-feastol))
         
         (> attempts 2)

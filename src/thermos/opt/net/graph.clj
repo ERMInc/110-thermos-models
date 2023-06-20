@@ -106,6 +106,65 @@
   
   )
 
+(defn reachable-through
+  "Given `adj` an adjacency map, and `js`, a starting set, return
+  a map which labels each edge in the adjacency matrix by the vertices of is
+  reachable through that edge when starting from js"
+
+  [adj js]
+
+  (let [sconcat (comp set concat)
+        sconj   (comp set conj)
+        seen (volatile! #{})
+        under  (volatile! {})
+        result (volatile! {})
+        dfs! (fn dfs! [path-verts path-edges x]
+               (cond
+                 ;; First, if we have a cycle, we say that everything above x
+                 ;; can reach everything x can reach, but then we stop
+                 (contains? path-verts x)
+                 (do
+                   (doseq [p path-verts]
+                     (vswap! under
+                             update p
+                             (fn [ps]
+                               ;; from p, we can reach all x can reach, and x, but not p
+                               ;; (although p is reachable from p, that is not something
+                               ;; in the contract for the function).
+                               (-> ps (sconcat (@under x) (list x)) (disj p)))))
+                   (doseq [e path-edges]
+                     (vswap! result update e sconcat (@under x) (list x))))      
+                 
+                 ;; Next as a shortcut, if we already completed a traversal from x
+                 ;; we can reuse its result. This is a diamond in the graph.
+                 (@seen x)
+                 (do
+                   (doseq [p path-verts]
+                     (vswap! under update p sconcat (@under x) (list x)))
+                   (doseq [e path-edges]
+                     (vswap! result update e sconcat (@under x) (list x))))
+
+                 ;; Otherwise we need to do the traversal
+                 :else
+                 (do
+                   ;; first, everywhere in the path-verts can reach x
+                   (doseq [p path-verts] (vswap! under update p sconj x))
+                   (doseq [e path-edges] (vswap! result update e sconj x))
+                   ;; next process all adjacent vertices, with x on the path-verts
+                   (doseq [a (adj x)]
+                     ;; we filter out any edge which we have already
+                     ;; come down because in our flow problem we
+                     ;; cannot use any edge in both directions.
+                     (when-not (contains? path-edges [a x])
+                       (dfs! (conj path-verts x)
+                             (conj path-edges [x a]) a)))
+                   ;; and now we have visited everywhere under x
+                   (vswap! seen conj x))))
+        ]
+    (doseq [k js] (dfs! #{} #{} k))
+    @result)
+  )
+
 (defn reachable-from
   "Given `adj` which maps indices to sets of indices, and `js`, a
   starting set of indices, return the set of all indices reachable
