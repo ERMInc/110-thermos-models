@@ -54,6 +54,7 @@
 
       (ds/opt :supply)
       {:capacity-kw number?
+       (ds/opt :capacity-kwh) number?
        (ds/opt :cost) number?
        (ds/opt :cost%kwh) number?
        (ds/opt :cost%kwp) number?

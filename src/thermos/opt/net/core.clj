@@ -223,6 +223,24 @@
                {} svtx)]
 
           (fn [i] (or (get supply-bounds i) 0)))
+
+        supply-max-mean
+        (let [supply-bounds
+              (reduce
+               (fn [a k]
+                 (let [summed-flow-bounds
+                       (reduce + (demand-kwp k)
+                               (for [n (neighbours k)]
+                                 (-> flow-bounds (get [k n]) :mean-max (or 0))))
+                       flow-bound (* flow-bound-slack summed-flow-bounds)
+                       given-capacity (some-> (vertices k) :supply :capacity-kwh
+                                              (* years-per-hour))
+                       
+                       ]
+                   (assoc a k (min flow-bound (or given-capacity flow-bound)))))
+               {} svtx)]
+
+          (fn [i] (get supply-bounds i)))
         
         supply-fixed-cost   (fn [i] (or (-> (vertices i) :supply :cost) 0))
         supply-cost-per-kwh (fn [i] (or (-> (vertices i) :supply (get :cost%kwh)) 0))
@@ -511,16 +529,20 @@
       (for [a arc] [<= [:AIN a] [:ARC-FLOW-KW a :peak]])
       
       ;; supply capacity sufficient
-      (for [i svtx]
+      (for [i svtx
+            :let [max-diverse-peak (supply-max-capacity i)
+                  max-raw-peak     (/ max-diverse-peak (diversity 1000.0))
+                  max-mean         (or (supply-max-mean i) max-raw-peak)]]
         [:and
          [>= [:SUPPLY-CAP-KW i]   [* [:SUPPLY-KW i :peak] [:SUPPLY-DIVERSITY i]]]
          [>= [:SUPPLY-CAP-KW i]   [:SUPPLY-KW i :mean]]
-         [<= [:SUPPLY-CAP-KW i]   [* [:SVIN i] (supply-max-capacity i)]]
+         [<= [:SUPPLY-CAP-KW i]   [* [:SVIN i] max-diverse-peak]]
          ;; TODO these two _should_ be redundant but putting them in
          ;; strengthens the bounds and makes model work better when
          ;; supply-max-capacity is very large.
-         [<= [:SUPPLY-KW i :peak] [* [:SVIN i] (/ (supply-max-capacity i) (diversity 1000.0))]]
-         [<= [:SUPPLY-KW i :mean] [* [:SVIN i] (/ (supply-max-capacity i) (diversity 1000.0))]]
+         [<= [:SUPPLY-KW i :peak] [* [:SVIN i] max-raw-peak]]
+         [<= [:SUPPLY-KW i :mean] [* [:SVIN i] max-raw-peak]]
+         [<= [:SUPPLY-KW i :mean] [* [:SVIN i] max-mean]]
          
          [<= [:SVIN i]            [:SUPPLY-KW i :peak]]])
       
