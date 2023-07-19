@@ -459,14 +459,6 @@
                 (reduce (fn [a g] (update a g conj vid)) a)))
          {}
          svtx)
-
-        infill-target-groups
-        (reduce
-         (fn [a vid]
-           (->> (-> vertices (get vid) :demand :infill-connection-targets)
-                (reduce (fn [a g] (update a g conj vid)) a)))
-         {}
-         dvtx)
         ]
     {:maximize 
      [- total-connection-value
@@ -556,20 +548,7 @@
       (for [[_ vs] exclusive-supply-groups :when (seq (rest vs))]
         [<= [+ (for [i vs] [:SVIN i])] 1])
 
-      ;; infill rules for HNZP
-      (when-let [targets (:infill-connection-targets problem)]
-        (for [[target verts] infill-target-groups
-              :let [[lb ub] (get targets target [0.0 1.0])]
-              :when (and (seq verts)
-                         (or (> lb 0.0) (< ub 1.0)))]
-          (let [n (count verts)
-                ;; add a bit of rounding so it's never fully impossible
-                lb (Math/floor (* lb n))
-                ub (Math/ceil (* ub n))
-                n-connected [+ (for [i verts] [:DVIN i])]]
-            [<= lb n-connected ub])))
-      
-      ;; emissions limits
+      ;; emissions limits = 
       (for [e emission
             :let [lim (emissions-limit e)] :when lim]
         [<= (total-emissions e) lim])
