@@ -5,5 +5,5 @@
   com.rpl/specter {:mvn/version "1.1.3"},
   org.clojure/tools.logging {:mvn/version "0.4.1"}
   cse/clj-lp
-  {:git/url "https://github.com/cse-bristol/clj-lp.git",
+  {:git/url "https://github.com/ERMInc/clj-lp.git",
    :sha "66bf200caeb53e3fa6ab1e75e01341a7de116405"}}}
