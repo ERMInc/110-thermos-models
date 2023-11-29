@@ -5,8 +5,8 @@
   com.rpl/specter {:mvn/version "1.1.3"},
   org.clojure/tools.logging {:mvn/version "0.4.1"}
   cse/clj-lp
-  {:git/url "https://github.com/cse-bristol/clj-lp.git",
-   :sha "72a2d62ac999afcb332044cfb224e53ff32a04a6"}}
+  {:git/url "https://github.com/ERMInc/clj-lp.git",
+   :sha "bcd1263b72ec07dc145ccd8d20c5c3ea9dba44dc"}}
 
  :aliases
  {:dev
