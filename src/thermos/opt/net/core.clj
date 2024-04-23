@@ -5,7 +5,6 @@
   "Thermos network optimisation model. Translated from the python version."
   (:require [lp.scip :as scip]
             [com.rpl.specter :as s]
-            [lp.core :as lp]
             [clojure.tools.logging :as log]
             [clojure.java.io :as io]
             [thermos.opt.net.specs :refer [network-problem]]
@@ -175,6 +174,7 @@
         ins-types  (set (mapcat (comp keys :insulation :demand)   (:vertices problem)))
 
         ;; constants
+        min-cap-cost (:minimum-capacity-cost problem 0.01)
         flow-bound-slack (:flow-bound-slack problem 1.5)
 
         vertices   (assoc-by :id (:vertices problem))
@@ -363,14 +363,14 @@
         [+ (for [i svtx]
              [+
               [* [:SVIN i] (supply-fixed-cost i)]
-              [* [:SUPPLY-CAP-KW i] (max 0.01 (supply-cost-per-kwp i))]
-              [* [:SUPPLY-KW i :mean] (max 0.01 (supply-cost-per-kwh i)) hours-per-year]])]
+              [* [:SUPPLY-CAP-KW i] (max min-cap-cost (supply-cost-per-kwp i))]
+              [* [:SUPPLY-KW i :mean] (max min-cap-cost (supply-cost-per-kwh i)) hours-per-year]])]
 
         total-pipe-cost
         [+ (for [e edge :let [[i j] e]]
              [+
               [* [+ [:AIN [i j]] [:AIN [j i]]] (edge-fixed-cost e)]
-              [* [:EDGE-CAP-KW e] (max 0.01 (edge-cost-per-kwp e))]])]
+              [* [:EDGE-CAP-KW e] (max min-cap-cost (edge-cost-per-kwp e))]])]
         
         emissions-cost
         [+ (for [e emission]
