@@ -298,12 +298,12 @@
         
         total-emissions
         (fn [e]
-          [+
-           (for [i svtx] [* [:SUPPLY-KW i :mean] (supply-emissions-per-kw i e)])
+          [:+
+           (for [i svtx] [:* [:SUPPLY-KW i :mean] (supply-emissions-per-kw i e)])
            (for [i dvtx a alt-types :let [f (alternative-emissions-per-kwh i a e)]]
-             [-
-              [* [:ALT-IN i a] (demand-kwh i) f]
-              [* [:ALT-AVOIDED-KWH i a] f]])])
+             [:-
+              [:* [:ALT-IN i a] (demand-kwh i) f]
+              [:* [:ALT-AVOIDED-KWH i a] f]])])
 
         diversity (diversity-factor problem)
         
@@ -345,9 +345,9 @@
               [:- [:+ demand flow-out losses] [:+ supply flow-in]])))
 
         total-connection-value
-        [+ (for [i dvtx]
-             [-
-              [*
+        [:+ (for [i dvtx]
+             [:-
+              [:*
                [:DVIN i]
                (+ (vertex-fixed-value i)
                   (* (demand-kwh i) (vertex-value-per-kwh i))
@@ -355,50 +355,50 @@
 
               ;; we don't get paid for unmet demand
               ;; we don't want to multiply it by DVIN though, since that's quadratic
-              [* (unmet-demand i :mean)
+              [:* (unmet-demand i :mean)
                  hours-per-year
                  (vertex-value-per-kwh i)]])]
 
         total-supply-cost
-        [+ (for [i svtx]
-             [+
-              [* [:SVIN i] (supply-fixed-cost i)]
-              [* [:SUPPLY-CAP-KW i] (max min-cap-cost (supply-cost-per-kwp i))]
-              [* [:SUPPLY-KW i :mean] (max min-cap-cost (supply-cost-per-kwh i)) hours-per-year]])]
+        [:+ (for [i svtx]
+             [:+
+              [:* [:SVIN i] (supply-fixed-cost i)]
+              [:* [:SUPPLY-CAP-KW i] (max min-cap-cost (supply-cost-per-kwp i))]
+              [:* [:SUPPLY-KW i :mean] (max min-cap-cost (supply-cost-per-kwh i)) hours-per-year]])]
 
         total-pipe-cost
-        [+ (for [e edge :let [[i j] e]]
-             [+
-              [* [+ [:AIN [i j]] [:AIN [j i]]] (edge-fixed-cost e)]
-              [* [:EDGE-CAP-KW e] (max min-cap-cost (edge-cost-per-kwp e))]])]
+        [:+ (for [e edge :let [[i j] e]]
+             [:+
+              [:* [:+ [:AIN [i j]] [:AIN [j i]]] (edge-fixed-cost e)]
+              [:* [:EDGE-CAP-KW e] (max min-cap-cost (edge-cost-per-kwp e))]])]
         
         emissions-cost
-        [+ (for [e emission]
-             [*
+        [:+ (for [e emission]
+             [:*
               (emissions-cost-per-kg e)
               (total-emissions e)])]
 
         total-insulation-cost
-        [+ (for [i dvtx it ins-types]
-             [+
-              [* [:INSULATION-IN i it] (insulation-fixed-cost i it)]
-              [* [:INSULATION-KWH i it] (insulation-cost-per-kwh i it)]])]
+        [:+ (for [i dvtx it ins-types]
+             [:+
+              [:* [:INSULATION-IN i it] (insulation-fixed-cost i it)]
+              [:* [:INSULATION-KWH i it] (insulation-cost-per-kwh i it)]])]
 
         total-alt-cost
-        [+ (for [i dvtx a alt-types]
-             [-
-              [* [:ALT-IN i a]
+        [:+ (for [i dvtx a alt-types]
+             [:-
+              [:* [:ALT-IN i a]
                (+ (alternative-fixed-cost i a)
                   (* (alternative-cost-per-kwp i a) (demand-kwp i))
                   (* (alternative-cost-per-kwh i a) (demand-kwh i)))]
 
               ;; don't pay for what we didn't use due to insulation
-              [* [:ALT-AVOIDED-KWH i a] (alternative-cost-per-kwh i a)]])]
+              [:* [:ALT-AVOIDED-KWH i a] (alternative-cost-per-kwh i a)]])]
 
         avoided-demand-kwh
         (->> (for [i dvtx]
                [i (if (seq ins-types)
-                    [+ (for [it ins-types] [:INSULATION-KWH i it])]
+                    [:+ (for [it ins-types] [:INSULATION-KWH i it])]
                     0.0)])
              (into {}))
 
@@ -461,8 +461,8 @@
          svtx)
         ]
     {:maximize 
-     [- total-connection-value
-      [+
+     [:- total-connection-value
+      [:+
        total-supply-cost
        total-pipe-cost
        emissions-cost
@@ -474,11 +474,11 @@
      (list
       ;; Flow only goes one way
       (for [e edge]
-        [<= [+ [:AIN (vec e)] [:AIN (reverse (vec e))]] 1])
+        [:<= [:+ [:AIN (vec e)] [:AIN (reverse (vec e))]] 1])
 
       ;; force AIN if we use flow
       (for [a arc t period]
-        [<= [:ARC-FLOW-KW a t] [* [:AIN a] [:lp.core/upper [:ARC-FLOW-KW a t]]]])
+        [:<= [:ARC-FLOW-KW a t] [:* [:AIN a] [:lp.core/upper [:ARC-FLOW-KW a t]]]])
 
       ;; Flow balance at each vertex
       (for [i vtx t period]
@@ -491,13 +491,13 @@
       (for [a arc :let [e (as-edge a)]]
         [:and
          ;; Arcs carry their losses
-         [>= [:ARC-FLOW-KW a :mean] [* [:AIN a] [:LOSS-KW e]]]
+         [:>= [:ARC-FLOW-KW a :mean] [:* [:AIN a] [:LOSS-KW e]]]
 
          ;; Edges have capacity for peak flow
-         [>= [:EDGE-CAP-KW e] [* [:ARC-FLOW-KW a :peak] [:EDGE-DIVERSITY e]]]
+         [:>= [:EDGE-CAP-KW e] [:* [:ARC-FLOW-KW a :peak] [:EDGE-DIVERSITY e]]]
          
          ;; Edges have capacity for mean flow
-         [>= [:EDGE-CAP-KW e] [:ARC-FLOW-KW a :mean]]
+         [:>= [:EDGE-CAP-KW e] [:ARC-FLOW-KW a :mean]]
          ])
 
       ;; force dvin if arc is providing heat to a building - this
@@ -509,16 +509,16 @@
         (let [out  [:ARC-FLOW-KW [d n] t]
               back [:ARC-FLOW-KW [n d] t]
               is-in (if (contains? svtx d)
-                      [+ [:SVIN d] [:DVIN d]]
+                      [:+ [:SVIN d] [:DVIN d]]
                       [:DVIN d])]
           [:and
-           [<= out  [* is-in [:lp.core/upper out]]]
-           [<= back [* is-in [:lp.core/upper back]]]]))
+           [:<= out  [:* is-in [:lp.core/upper out]]]
+           [:<= back [:* is-in [:lp.core/upper back]]]]))
 
       ;; we also wish to say that if you build a pipe it should carry some peak flow.
       ;; this prevents the optimiser building pipes to nowhere, which can otherwise
       ;; happen if they don't cost much
-      (for [a arc] [<= [:AIN a] [:ARC-FLOW-KW a :peak]])
+      (for [a arc] [:<= [:AIN a] [:ARC-FLOW-KW a :peak]])
       
       ;; supply capacity sufficient
       (for [i svtx
@@ -526,38 +526,38 @@
                   max-raw-peak     (/ max-diverse-peak (diversity 1000.0))
                   max-mean         (or (supply-max-mean i) max-raw-peak)]]
         [:and
-         [>= [:SUPPLY-CAP-KW i]   [* [:SUPPLY-KW i :peak] [:SUPPLY-DIVERSITY i]]]
-         [>= [:SUPPLY-CAP-KW i]   [:SUPPLY-KW i :mean]]
-         [<= [:SUPPLY-CAP-KW i]   [* [:SVIN i] max-diverse-peak]]
+         [:>= [:SUPPLY-CAP-KW i]   [:* [:SUPPLY-KW i :peak] [:SUPPLY-DIVERSITY i]]]
+         [:>= [:SUPPLY-CAP-KW i]   [:SUPPLY-KW i :mean]]
+         [:<= [:SUPPLY-CAP-KW i]   [:* [:SVIN i] max-diverse-peak]]
          ;; TODO these two _should_ be redundant but putting them in
          ;; strengthens the bounds and makes model work better when
          ;; supply-max-capacity is very large.
-         [<= [:SUPPLY-KW i :peak] [* [:SVIN i] max-raw-peak]]
-         [<= [:SUPPLY-KW i :mean] [* [:SVIN i] max-raw-peak]]
-         [<= [:SUPPLY-KW i :mean] [* [:SVIN i] max-mean]]
+         [:<= [:SUPPLY-KW i :peak] [:* [:SVIN i] max-raw-peak]]
+         [:<= [:SUPPLY-KW i :mean] [:* [:SVIN i] max-raw-peak]]
+         [:<= [:SUPPLY-KW i :mean] [:* [:SVIN i] max-mean]]
          
-         [<= [:SVIN i]            [:SUPPLY-KW i :peak]]])
+         [:<= [:SVIN i]            [:SUPPLY-KW i :peak]]])
       
       ;; not too many supplies
       (when supply-count-max
-        [<= [+ (for [i svtx] [:SVIN i])] supply-count-max])
+        [:<= [:+ (for [i svtx] [:SVIN i])] supply-count-max])
 
       ;; only one supply from each exclusive supply group
       ;; the :when is (seq (rest vs)) because an exclusive group
       ;; of 1 doesn't require a constraint
       (for [[_ vs] exclusive-supply-groups :when (seq (rest vs))]
-        [<= [+ (for [i vs] [:SVIN i])] 1])
+        [:<= [:+ (for [i vs] [:SVIN i])] 1])
 
       ;; emissions limits = 
       (for [e emission
             :let [lim (emissions-limit e)] :when lim]
-        [<= (total-emissions e) lim])
+        [:<= (total-emissions e) lim])
 
       ;; rules for alternatives
       ;; 1. we must pick a heating system
       (for [i dvtx
             :when (not-empty (vertex-alternatives i))]
-        [= 1 [+
+        [:= 1 [:+
               [:DVIN i]
               (for [a alt-types] [:ALT-IN i a])]])
 
@@ -565,15 +565,15 @@
       (for [i dvtx a alt-types]
         [:and
          ;; 2. We can avoid as much as insulation allows us to
-         [<= [:ALT-AVOIDED-KWH i a] (avoided-demand-kwh i)]
+         [:<= [:ALT-AVOIDED-KWH i a] (avoided-demand-kwh i)]
          ;; 3. But only if we are actually using this alt.
-         [<= [:ALT-AVOIDED-KWH i a] [* [:ALT-IN i a] (demand-kwh i)]]])
+         [:<= [:ALT-AVOIDED-KWH i a] [:* [:ALT-IN i a] (demand-kwh i)]]])
 
 
       ;; rules for insulation:
       ;; 1. Big-M constraint to toggle payment of fixed cost.
       (for [i dvtx it ins-types]
-        [<= [:INSULATION-KWH i it] [* (insulation-max-kwh i it) [:INSULATION-IN i it]]])
+        [:<= [:INSULATION-KWH i it] [:* (insulation-max-kwh i it) [:INSULATION-IN i it]]])
 
       ;; Required pipes
       (for [e edge :when (edge-required e)]
