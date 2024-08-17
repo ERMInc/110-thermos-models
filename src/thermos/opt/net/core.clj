@@ -4,6 +4,7 @@
 (ns thermos.opt.net.core
   "Thermos network optimisation model. Translated from the python version."
   (:require [lp.scip :as scip]
+            [lp.gurobi :as gurobi]
             [com.rpl.specter :as s]
             [clojure.tools.logging :as log]
             [clojure.java.io :as io]
@@ -986,75 +987,76 @@
    "heuristics/veclendiving/freq" "5"
    "heuristics/veclendiving/maxlpiterquot" "0.075"
    "heuristics/veclendiving/maxlpiterofs" "1500"
-   "separating/flowcover/freq" "8"
-   "numerics/feastol" initial-feastol})
+   "separating/flowcover/freq" "8"})
 
-(defn- solve [mip & {:keys [mip-gap time-limit adjust-feastol]}]
-  (loop [attempts 0
-         mip      mip
-         feastol  (get scip-settings "numerics/feastol")]
-    (let [sol-free (scip/solve* mip
-                                (assoc scip-settings
-                                       "numerics/feastol" feastol
-                                       :time-limit time-limit
-                                       :mip-gap mip-gap))
+(defn- solve [mip & {:keys [mip-gap time-limit adjust-feastol solver]
+                     :or {solver :scip}}]
+  (let [run-solver (case solver
+                     :scip (fn [lp s] (scip/solve* lp (merge scip-settings s)))
+                     :gurobi gurobi/solve*)]
+    (loop [attempts 0
+           mip      mip
+           feastol  initial-feastol]
+      (let [sol-free (run-solver mip {:feasibility-tolerance feastol
+                                      :time-limit time-limit
+                                      :mip-gap mip-gap})
 
-          sol-par (parameterise sol-free)
-          
-          sol-fix (if (:exists (:solution sol-free))
-                    (-> sol-par
-                        (fix-decisions)
-                        (scip/solve* scip-settings)
-                        (unfix-decisions))
-                    sol-free)
-          ]
-      (cond
-        (and (not (:exists (:solution sol-free)))
-             (= :infeasible (:reason (:solution sol-free)))
-             adjust-feastol
-             (= feastol initial-feastol))
-        (do
-          (log/warnf "Unexpectedly infeasible (tol=%s); retry tol=%s"
-                     feastol retry-feastol)
-          
-          (recur attempts mip retry-feastol))
-        
-        (> attempts 2)
-        (do
-          (log/error "A feasible free solution led to an infeasible fixed solution too many times. This probably means that the supply capacity is very marginal, and the optimiser can't work out whether to include or exclude a particular demand.")
-
-          (comment
-            (doseq [u (scip/minuc (fix-decisions sol-par))]
-              (log/info "UC:" u))
+            sol-par (parameterise sol-free)
             
-            (let [svtx (::svtx sol-par)]
-              (doseq [s svtx]
-                (println s "\t" "SVIN\t" (-> sol-free :vars :SVIN :value (get s)))
-                (println s "\t" "KWP\t"  (-> sol-free :vars :SUPPLY-KW :value (get [s :peak])))
-                (println s "\t" "KWA\t"  (-> sol-free :vars :SUPPLY-KW :value (get [s :mean])))
-                (println s "\t" "CAP\t"  (-> sol-free :vars :SUPPLY-CAP-KW :value (get s)))
-                (println s "\t" "D0\t"   (-> sol-free :vars :SUPPLY-DIVERSITY :value (get s)))
-                (println s "\t" "D1\t"   (-> sol-par  :vars :SUPPLY-DIVERSITY :value (get s))))))
+            sol-fix (if (:exists (:solution sol-free))
+                      (-> sol-par
+                          (fix-decisions)
+                          (run-solver {})
+                          (unfix-decisions))
+                      sol-free)
+            ]
+        (cond
+          (and (not (:exists (:solution sol-free)))
+               (= :infeasible (:reason (:solution sol-free)))
+               adjust-feastol
+               (= feastol initial-feastol))
+          (do
+            (log/warnf "Unexpectedly infeasible (tol=%s); retry tol=%s"
+                       feastol retry-feastol)
+            
+            (recur attempts mip retry-feastol))
           
-          sol-fix)
+          (> attempts 2)
+          (do
+            (log/error "A feasible free solution led to an infeasible fixed solution too many times. This probably means that the supply capacity is very marginal, and the optimiser can't work out whether to include or exclude a particular demand.")
 
-        (and (:exists (:solution sol-free)) (not (:exists (:solution sol-fix))))
-        (recur (inc attempts) sol-par retry-feastol)
-        
-        :else
-        (let [stable
-              (= (summary-parameters sol-free)
-                 (summary-parameters sol-fix))]
-          ;; Copy solution information from the free version, except /value/
-          ;; which is more true in the fixed one.
-          (update sol-fix
-                  :solution
-                  merge
-                  (-> (:solution sol-free)
-                      (dissoc :value :exists)
-                      (assoc :stable stable)
-                      (assoc :free-value (:value (:solution sol-free)))))))
-      )))
+            (comment
+              (doseq [u (scip/minuc (fix-decisions sol-par))]
+                (log/info "UC:" u))
+              
+              (let [svtx (::svtx sol-par)]
+                (doseq [s svtx]
+                  (println s "\t" "SVIN\t" (-> sol-free :vars :SVIN :value (get s)))
+                  (println s "\t" "KWP\t"  (-> sol-free :vars :SUPPLY-KW :value (get [s :peak])))
+                  (println s "\t" "KWA\t"  (-> sol-free :vars :SUPPLY-KW :value (get [s :mean])))
+                  (println s "\t" "CAP\t"  (-> sol-free :vars :SUPPLY-CAP-KW :value (get s)))
+                  (println s "\t" "D0\t"   (-> sol-free :vars :SUPPLY-DIVERSITY :value (get s)))
+                  (println s "\t" "D1\t"   (-> sol-par  :vars :SUPPLY-DIVERSITY :value (get s))))))
+            
+            sol-fix)
+
+          (and (:exists (:solution sol-free)) (not (:exists (:solution sol-fix))))
+          (recur (inc attempts) sol-par retry-feastol)
+          
+          :else
+          (let [stable
+                (= (summary-parameters sol-free)
+                   (summary-parameters sol-fix))]
+            ;; Copy solution information from the free version, except /value/
+            ;; which is more true in the fixed one.
+            (update sol-fix
+                    :solution
+                    merge
+                    (-> (:solution sol-free)
+                        (dissoc :value :exists)
+                        (assoc :stable stable)
+                        (assoc :free-value (:value (:solution sol-free)))))))
+        ))))
 
 (defn output-solution [{:keys [vars solution] :as s} iters objective-values]
   (if (:exists solution)
@@ -1138,7 +1140,9 @@
                     hr (- hr (* d 24))]
                 (str d "d" (int hr) "h")))))))))
 
-(defn run-model [problem]
+(defn run-model [problem & {:keys [solver]
+                            :or {solver :scip}}]
+  {:pre [(#{:scip :gurobi} solver)]}
   (log/info "Solving network problem")
   (let [mip             (construct-mip problem)
         _               (log/info "Constructed MIP")
@@ -1168,6 +1172,7 @@
       (let [iteration-start (System/currentTimeMillis)
 
             solved-mip (solve mip
+                              :solver solver
                               :adjust-feastol should-be-feasible
                               :mip-gap mip-gap
                               :time-limit

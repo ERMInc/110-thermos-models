@@ -6,4 +6,4 @@
   org.clojure/tools.logging {:mvn/version "0.4.1"}
   cse/clj-lp
   {:git/url "https://github.com/cse-bristol/clj-lp.git",
-   :sha "3ade69d4e8ce888bb49fc4cea0360b307e43a2e1"}}}
+   :sha "34b732abf4b871198a4c921a9bf7783dd2353f88"}}}
