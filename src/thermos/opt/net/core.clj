@@ -745,8 +745,6 @@
         roots   (-> mip :vars :SVIN :value
                     (->> (keep (fn [[i v]] (when (truthy v) i)))))
 
-        max-0 #(max (or %1 0) (or %2 0))
-
         vtx-map (::vtx-map mip)
 
         reachability (graph/close-adjacency-map adj roots)
@@ -1247,7 +1245,6 @@
                  (conj obj-vals (:value (:solution solved-mip)))
                  best)
           )))))
-
 
 (comment
   (def problem (with-open [r (java.io.PushbackReader. (io/reader "/home/hinton/tmp/problem.edn"))]

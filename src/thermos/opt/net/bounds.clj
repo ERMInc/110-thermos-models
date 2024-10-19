@@ -5,8 +5,9 @@
   "Flow bounds calculation for network model problems"
   (:require [thermos.opt.net.diversity :refer [diversity-factor]]
             [thermos.opt.net.graph :as graph]
-            [clojure.tools.logging :as log]
-            [clojure.set :as set]))
+            [clojure.tools.logging :as log]))
+
+(def ^:const hours-per-year (* 24.0 365))
 
 (defn nzmin "Minimum of x and y which is not zero" [x y]
   (cond (zero? x) y
@@ -121,7 +122,7 @@
           (let [[v & downstream] downstream
                 peak             (-> vertices (get v) (:demand-kwp 0))
                 d-peak           (-> vertices (get v) (:demand-dkwp 0))
-                mean             (-> vertices (get v) (:demand-kwh 0))
+                mean             (-> vertices (get v) (:demand-kwh 0) (/ hours-per-year))
                 count            (-> vertices (get v) (:count 0))]
             (recur
              downstream
@@ -135,63 +136,6 @@
              (+ peak-max peak)
              (+ d-peak-max d-peak)
              (+ mean-max mean))))))))
-
-#_
-(defn compute-bounds-old
-  "Problem is a network model problem, as defined by the specs adjacent.
-  
-  This function should compute a structure which looks like
-
-  {[i j] => {:count-min 0 :peak-min 0 :mean-min 0
-             :count-max 0 :peak-max 0 :mean-max 0}}
-
-  i.e. it maps from an ARC i->j to a tuple. The first thing in the
-  tuple gives lower bounds, and the second gives upper bounds.
-
-  The bounds are for the maximum flow of that type through the arc in
-  that direction.
-
-  An important tweak is that the peak flow includes un-diversification
-  of demands.
-  "
-  [problem]
-  (let [vertices (vertex-information problem)
-
-        ;; a map that goes from VERTEX to
-        ;; ADJACENT SET. It is DIRECTED, so i->j
-        ;; doesn't imply j->i
-        adjacency  (make-adjacency problem vertices)
-        inv-adjacency (graph/invert-adjacency-map adjacency)
-
-        set-bounds (memoize (partial single-edge-bounds vertices))
-        
-        arc-bounds
-        (fn [[i j]]             ;; bounds to put on edge FROM i TO j
-          (let [downstream
-                (-> adjacency
-                    (update i disj j) ;; delete edge
-                    (update j disj i) ;; delete rev-edge in case
-                    (graph/reachable-from #{j}))
-                
-                upstream
-                (-> inv-adjacency
-                    (update i disj j)
-                    (update j disj i)
-                    (graph/reachable-from #{i}))
-                ]
-            ;; so now we have vertices reachable from j (the far side of the edge)
-            ;; and vertices from which i is reachable (the near side of the edge)
-            (set-bounds upstream downstream)
-            ))
-        
-        ]
-    ;; consider using pmap here?
-    (let [all-arcs (mapcat (juxt (juxt :i :j) (juxt :j :i)) (:edges problem))
-          solution (into {} (map (fn [a] [a (arc-bounds a)]) all-arcs))
-          ]
-      (log/info "Bounds computed")
-      solution
-      )))
 
 (defn pmap-n
   "Like map, except f is applied in parallel. Semi-lazy in that the
