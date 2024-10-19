@@ -175,7 +175,6 @@
         ins-types  (set (mapcat (comp keys :insulation :demand)   (:vertices problem)))
 
         ;; constants
-        min-cap-cost (:minimum-capacity-cost problem 0.01)
         flow-bound-slack (:flow-bound-slack problem 1.5)
 
         vertices   (assoc-by :id (:vertices problem))
@@ -364,14 +363,14 @@
         [:+ (for [i svtx]
              [:+
               [:* [:SVIN i] (supply-fixed-cost i)]
-              [:* [:SUPPLY-CAP-KW i] (max min-cap-cost (supply-cost-per-kwp i))]
-              [:* [:SUPPLY-KW i :mean] (max min-cap-cost (supply-cost-per-kwh i)) hours-per-year]])]
+              [:* [:SUPPLY-CAP-KW i] (supply-cost-per-kwp i)]
+              [:* [:SUPPLY-KW i :mean] (supply-cost-per-kwh i) hours-per-year]])]
 
         total-pipe-cost
         [:+ (for [e edge :let [[i j] e]]
              [:+
               [:* [:+ [:AIN [i j]] [:AIN [j i]]] (edge-fixed-cost e)]
-              [:* [:EDGE-CAP-KW e] (max min-cap-cost (edge-cost-per-kwp e))]])]
+              [:* [:EDGE-CAP-KW e] (edge-cost-per-kwp e)]])]
         
         emissions-cost
         [:+ (for [e emission]
@@ -1063,13 +1062,37 @@
           ins-types        (::ins-types s)
           vtx              (into (::svtx s) (::dvtx s))
           ain              (->> vars :AIN              :value (into {}))
-          edge-capacity    (->> vars :EDGE-CAP-KW      :value (into {}))
-          edge-losses      (->> vars :LOSS-KW          :value (into {}))
           edge-diversity   (->> vars :EDGE-DIVERSITY   :value (into {}))
+
+          ;; arc flow is precise, whereas edge-cap-kw may float above if it has no cost term.
+          ;; so we get out arc flow values and reapply diversity here.
+          edge-capacity    (let [arc-flow (into {} (:value (:ARC-FLOW-KW vars)))]
+                             (into
+                              {}
+                              (for [e edge]
+                                (let [m1 (arc-flow [e :mean])
+                                      m2 (arc-flow [(rev-edge e) :mean])
+                                      d  (edge-diversity e)
+                                      p1 (arc-flow [e :peak])
+                                      p2 (arc-flow [(rev-edge e) :peak])]
+                                  [e (max m1 m2 (* d p1) (* d p2))]))))
+
+          edge-losses      (->> vars :LOSS-KW          :value (into {}))
           dvin             (->> vars :DVIN             :value (into {}))
           svin             (->> vars :SVIN             :value (into {}))
-          supply-capacity  (->> vars :SUPPLY-CAP-KW    :value (into {}))
           supply-diversity (->> vars :SUPPLY-DIVERSITY :value (into {}))
+
+          ;; similar to edge-capacity, we don't use the cost driver because it's relaxed
+          ;; if there's no variable cost term.
+          supply-capacity  (let [supply-cap (into {} (:value (:SUPPLY-KW vars)))]
+                             (into
+                              {}
+                              (for [s (::svtx s)]
+                                [s (let [d (supply-diversity s)
+                                         m (supply-cap [s :mean])
+                                         p (supply-cap [s :peak])]
+                                     (max m (* d p)))])))
+          
           supply-output    (->> vars :SUPPLY-KW        :value (into {}))
 
           insulation     (-> vars :INSULATION-KWH      :value (into {}))
