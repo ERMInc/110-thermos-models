@@ -129,7 +129,32 @@
       [(as-edge e) (first ks)])))
 
 
-(defn construct-mip [problem]
+(defn construct-mip
+  "Constructs the formalism for a network `problem` and returns the
+  MIP (suitable for use with `lp.io/cplex`, `scip/solve` etc.)
+
+  Numeric controls are
+
+  - `cost-scale`: a divisor on costs, so 1000 means the objective is scaled to thousands of pounds
+  - `cost-precision`: used for rounding objective coefficients (where possible). If this is 10.0,
+     the model will attempt to round cost coefficients to the nearest 10.0 `cost-scale` units
+  - `edge-cost-precision`: if the variable cost coefficient for an edge is dominated by the fixed,
+     it may help to roll the fixed into the variable. A value of 0.05 would mean that if the variable
+     cost can only affect the total by 5% the variable part is rolled into the fixed.
+  - `mean-flow-scale`: a scaling factor applied to the mean flow units in the flow network. 10 means divide 10
+  - `peak-flow-scale`: a like `mean-flow-scale` but for peak
+  "
+  [problem & {:keys [cost-scale
+                     cost-precision
+                     edge-cost-precision
+                     mean-flow-scale
+                     peak-flow-scale]
+              :or {cost-scale 1.0
+                   cost-precision 10.0
+                   edge-cost-precision 0.05
+                   mean-flow-scale 1.0
+                   peak-flow-scale 1.0}
+              }]
   {:pre [(valid? network-problem problem)]}
 
   (let [flow-bounds (or (:bounds problem)
@@ -368,9 +393,33 @@
 
         total-pipe-cost
         [:+ (for [e edge :let [[i j] e]]
-             [:+
-              [:* [:+ [:AIN [i j]] [:AIN [j i]]] (edge-fixed-cost e)]
-              [:* [:EDGE-CAP-KW e] (edge-cost-per-kwp e)]])]
+              (let [bounds-a       (get flow-bounds e)
+                    bounds-b       (get flow-bounds (rev-edge e))
+                    ;; if either set of bounds is zero both ways, then the edge
+                    ;; can only go in one direction so we will ignore the reverse
+                    ;; direction bounds
+                    bounds-a       (if (and (zero? (:diverse-peak-min bounds-a))
+                                            (zero? (:diverse-peak-max bounds-a)))
+                                     bounds-b
+                                     bounds-a)
+                    bounds-b       (if (and (zero? (:diverse-peak-min bounds-b))
+                                            (zero? (:diverse-peak-max bounds-b)))
+                                     bounds-a
+                                     bounds-b)
+                    ;; now we can see how much the flow can change the cost of the edge
+                    min-flow       (min (:diverse-peak-min bounds-a) (:diverse-peak-min bounds-b))
+                    max-flow       (max (:diverse-peak-max bounds-a) (:diverse-peak-max bounds-b))
+                    max-delta%kw      (abs (- max-flow min-flow))
+                    cost-fix       (edge-fixed-cost e)
+                    cost%kwp       (edge-cost-per-kwp e)
+                    max-delta%£    (* cost%kwp max-delta%kw)]
+                (if (and (not (zero? cost-fix))
+                         (<= (/ max-delta%£ cost-fix) edge-cost-precision))
+                  [:* [:+ [:AIN [i j]] [:AIN [j i]]]
+                   (+ cost-fix (* cost%kwp 0.5 (+ min-flow max-flow)))]
+                  [:+
+                   [:* [:+ [:AIN [i j]] [:AIN [j i]]] cost-fix]
+                   [:* [:EDGE-CAP-KW e] cost%kwp]])))]
         
         emissions-cost
         [:+ (for [e emission]
@@ -470,6 +519,9 @@
        total-alt-cost]
       ]
 
+     :objective-scale cost-scale
+     :objective-precision cost-precision
+     
      :subject-to
      (list
       ;; Flow only goes one way
@@ -1304,4 +1356,36 @@
     (binding [lp.io/*keep-temp-dir* true]
       (run-model -last-problem)
       ))
+
+
+  (doseq [edn (file-seq (io/file "/home/hinton/jobs/edn/"))]
+    (when (.endsWith (.getName edn) ".edn")
+      (let [problem (with-open [r (java.io.PushbackReader. (io/reader edn))]
+                      (binding [*read-eval* false] (read r)))
+            mip (construct-mip problem
+                               :cost-scale 1.0
+                               :cost-precision 0.0
+                               :edge-cost-precision 0.0
+                               :mean-flow-scale 1.0
+                               :peak-flow-scale 1.0)]
+        (spit (io/file
+               "/home/hinton/jobs/lp0"
+               (str (.getName edn) ".lp"))
+              (:program (lp.io/cplex mip))))))
+
+  (doseq [edn (file-seq (io/file "/home/hinton/jobs/edn/"))]
+    (when (.endsWith (.getName edn) ".edn")
+      (let [problem (with-open [r (java.io.PushbackReader. (io/reader edn))]
+                      (binding [*read-eval* false] (read r)))
+            mip (construct-mip problem
+                               :cost-scale 100.0
+                               :cost-precision 10.0
+                               :edge-cost-precision 0.05
+                               :mean-flow-scale 1.0
+                               :peak-flow-scale 1.0)]
+        (spit (io/file
+               "/home/hinton/jobs/lp1"
+               (str (.getName edn) ".lp"))
+              (:program (lp.io/cplex mip))))))
+  
   )
