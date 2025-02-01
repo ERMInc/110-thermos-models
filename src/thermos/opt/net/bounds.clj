@@ -69,7 +69,6 @@
    :count-max  0 :peak-max   0 :mean-max 0
    :diverse-peak-min 0 :diverse-peak-max 0})
 
-
 (def LOTS
   "The bounds for an arc where we can't find bounds"
   {:count-min  0     :peak-min   0 :mean-min 0
@@ -199,7 +198,12 @@
   "
   [problem]
   
-  (let [vertices  (vertex-information problem)
+  (let [time      (System/currentTimeMillis)
+        log-time  (fn [message]
+                    (let [now (System/currentTimeMillis)
+                          delta (int (/ (- now time) 1000))]
+                      (log/info "Flow bounds timing: %s (%ds)")))
+        vertices  (vertex-information problem)
         adjacency (make-adjacency problem vertices)
         inverse   (graph/invert-adjacency-map adjacency)
 
@@ -218,7 +222,7 @@
         anti-connectors (set (for [[i j] connectors] [j i]))
 
         single-edge-bounds (memoize (partial single-edge-bounds vertices))
-        
+        _ (log-time "initialized")
         ;; this is all bridges internal to the graph once there are no connectors.
         ;; needed because power cannot flow up a connector, but bridge finding
         ;; cannot see that fact.
@@ -229,7 +233,7 @@
                                connectors)
                               (graph/bridges)
                               (set))
-        
+        _ (log-time "computed bridges")
         bridges    (concat internal-bridges connectors anti-connectors)
         parallelism (min 4 (.availableProcessors (Runtime/getRuntime)))
 
@@ -248,6 +252,8 @@
                                                               (graph/reachable-from adjacency #{i})))]]))
                             bridges)
                            (reduce (fn [a es] (into a es)) {}))
+
+        _ (log-time "computed bounds for bridges")
         
         ;; a version of adjacency with all bridges removed
         components (reduce
@@ -261,6 +267,8 @@
         ;; if the theory is that for each such edge the answer is the same rather than thinking hard
         ;; we can just do it once and find out. Forward and reverse should be same as well?
 
+        _ (log-time "found components without bridges")
+        
         component-bounds
         (let [a (atom {})]
           (fn [ci i j]
@@ -272,28 +280,31 @@
                   (swap! a assoc ci result)
                   result))))]
     
+    
     (log/info "Flow bounds for" (count internal-bridges) "internal bridges,"
                     (count connectors) "connectors,"
                     (count (set (vals component-labels))) "components,"
                     (count (:edges problem)) "edges total")
     
-    (->> (:edges problem) (mapcat (juxt (juxt :i :j) (juxt :j :i)))
-             (pmap-n
-              parallelism
-              (fn [[i j]]
-                [[i j]
-                 (or (bridge-bounds [i j])
-                     (let [ci (component-labels i)
-                           cj (or (component-labels j) ci)
-                           ci (or ci cj)]
-                       (if (= ci cj)
-                         (component-bounds ci i j)
+    (let [result (->> (:edges problem) (mapcat (juxt (juxt :i :j) (juxt :j :i)))
+                      (pmap-n
+                       parallelism
+                       (fn [[i j]]
+                         [[i j]
+                          (or (bridge-bounds [i j])
+                              (let [ci (component-labels i)
+                                    cj (or (component-labels j) ci)
+                                    ci (or ci cj)]
+                                (if (= ci cj)
+                                  (component-bounds ci i j)
 
-                         (do (log/warnf "Edge unexpectedly crosses components %s %s" i j)
-                             LOTS
-                             ))))
-                 ]))
-             (into {}))
+                                  (do (log/warnf "Edge unexpectedly crosses components %s %s" i j)
+                                      LOTS
+                                      ))))
+                          ]))
+                      (into {}))]
+      (log-time "generated result for every edge")
+      result)
     ))
 
 
