@@ -15,9 +15,15 @@
             [thermos.opt.net.graph :as graph]
             [clojure.set :as set]))
 
-(let [env (into {} (System/getenv))]
-  (def initial-feastol (or (env "THERMOS_INITIAL_FEASTOL") "1e-3"))
-  (def retry-feastol   (or (env "THERMOS_RETRY_FEASTOL")   "1e-6")))
+(let [env (into {} (System/getenv))
+      env-initial (env "THERMOS_INITIAL_FEASTOL")
+      env-retry   (env "THERMOS_RETRY_FEASTOL")]
+  
+  (defn initial-feastol [solver]
+    (or env-initial (if (= solver :gurobi) "1e-6" "1e-3")))
+  
+  (defn retry-feastol   [solver]
+    (or env-retry (if (= solver :gurobi) "1e-9" "1e-6"))))
 
 (def ^:const hours-per-year (* 24.0 365))
 
@@ -1042,7 +1048,9 @@
                      :or {solver :scip}}]
   (let [run-solver (case solver
                      :scip (fn [lp s] (scip/solve* lp (merge scip-settings s)))
-                     :gurobi gurobi/solve*)]
+                     :gurobi gurobi/solve*)
+        initial-feastol (initial-feastol solver)
+        retry-feastol   (retry-feastol solver)]
     (loop [attempts 0
            mip      mip
            feastol  initial-feastol]
