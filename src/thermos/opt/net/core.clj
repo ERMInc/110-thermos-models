@@ -141,22 +141,22 @@
 
   Numeric controls are
 
-  - `cost-scale`: a divisor on costs, so 1000 means the objective is scaled to thousands of pounds
-  - `cost-precision`: used for rounding objective coefficients (where possible). If this is 10.0,
-     the model will attempt to round cost coefficients to the nearest 10.0 `cost-scale` units
+  - `objective-scale`: a divisor on costs, so 1000 means the objective is scaled to thousands of pounds
+  - `objective-precision`: used for rounding objective coefficients (where possible). If this is 10.0,
+     the model will attempt to round cost coefficients to the nearest 10.0 `objective-scale` units
   - `edge-cost-precision`: if the variable cost coefficient for an edge is dominated by the fixed,
      it may help to roll the fixed into the variable. A value of 0.05 would mean that if the variable
      cost can only affect the total by 5% the variable part is rolled into the fixed.
   - `mean-flow-scale`: a scaling factor applied to the mean flow units in the flow network. 10 means divide 10
   - `peak-flow-scale`: a like `mean-flow-scale` but for peak
   "
-  [problem & {:keys [cost-scale
-                     cost-precision
+  [problem & {:keys [objective-scale
+                     objective-precision
                      edge-cost-precision
                      mean-flow-scale
                      peak-flow-scale]
-              :or {cost-scale 1.0
-                   cost-precision 10.0
+              :or {objective-scale 1.0
+                   objective-precision 10.0
                    edge-cost-precision 0.05
                    mean-flow-scale 1.0
                    peak-flow-scale 1.0}
@@ -525,8 +525,8 @@
        total-alt-cost]
       ]
 
-     :objective-scale cost-scale
-     :objective-precision cost-precision
+     :objective-scale objective-scale
+     :objective-precision objective-precision
      
      :subject-to
      (list
@@ -1232,6 +1232,10 @@
         mip-gap            (:mip-gap problem 0.05)
         param-fix-gap      (:param-gap problem 0)
         should-be-feasible (:should-be-feasible problem false)
+
+        objective-scale     (or (:objective-scale problem) 1.0)
+        objective-precision (or (:objective-precision problem) 0.1)
+        edge-cost-precision (or (:edge-cost-precision problem) 0.0)
         
         start-time      (System/currentTimeMillis)
         end-time (+ (* time-limit 1000 3600) start-time)
@@ -1241,8 +1245,7 @@
      (format "%-4s%-8s%-8s%-8s%-3s%-10s%-6s%-6s%-12s%-7s%-7s"
              "N" "Tn" "T" "Tr" ">" "VALUE" "NV" "NE" "STATE" "δFIX%" "GAP%"))
 
-    (def -last-problem problem)
-    
+    ;; (def -last-problem problem)
     
     (loop [mip      mip ;; comes parameterised out of the gate
            seen     #{} ;; decision sets we have already seen
@@ -1254,6 +1257,9 @@
 
             solved-mip (solve mip
                               :solver solver
+                              :objective-scale objective-scale
+                              :objective-precision objective-precision
+                              :edge-cost-precision edge-cost-precision
                               :adjust-feastol should-be-feasible
                               :mip-gap mip-gap
                               :time-limit
@@ -1371,8 +1377,8 @@
       (let [problem (with-open [r (java.io.PushbackReader. (io/reader edn))]
                       (binding [*read-eval* false] (read r)))
             mip (construct-mip problem
-                               :cost-scale 1.0
-                               :cost-precision 0.0
+                               :objective-scale 1.0
+                               :objective-precision 0.0
                                :edge-cost-precision 0.0
                                :mean-flow-scale 1.0
                                :peak-flow-scale 1.0)]
@@ -1386,8 +1392,8 @@
       (let [problem (with-open [r (java.io.PushbackReader. (io/reader edn))]
                       (binding [*read-eval* false] (read r)))
             mip (construct-mip problem
-                               :cost-scale 100.0
-                               :cost-precision 10.0
+                               :objective-scale 100.0
+                               :objective-precision 10.0
                                :edge-cost-precision 0.05
                                :mean-flow-scale 1.0
                                :peak-flow-scale 1.0)]

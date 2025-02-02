@@ -77,6 +77,10 @@
 
     (ds/opt :force-insulation) boolean?
     (ds/opt :supply-limit) (ds/maybe integer?)
+
+    (ds/opt :objective-scale) (ds/maybe number?)
+    (ds/opt :objective-precision) (ds/maybe number?)
+    (ds/opt :edge-cost-precision) (ds/maybe number?)
     }
    
    )

@@ -4,8 +4,8 @@
 (ns thermos.opt.net.diversity)
 
 (defn diversity-factor [problem]
-  (let [limit (:diversity-limit problem 0.62)
-        rate (:diversity-rate problem 1.0)]
+  (let [limit (or (:diversity-limit problem) 0.62)
+        rate (or (:diversity-rate problem) 1.0)]
     (fn [n]
       (/ (Math/round
           (* 100.0
