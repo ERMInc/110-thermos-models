@@ -415,7 +415,7 @@
                     ;; now we can see how much the flow can change the cost of the edge
                     min-flow       (min (:diverse-peak-min bounds-a) (:diverse-peak-min bounds-b))
                     max-flow       (max (:diverse-peak-max bounds-a) (:diverse-peak-max bounds-b))
-                    max-delta%kw      (abs (- max-flow min-flow))
+                    max-delta%kw      (Math/abs (- max-flow min-flow))
                     cost-fix       (edge-fixed-cost e)
                     cost%kwp       (edge-cost-per-kwp e)
                     max-delta%£    (* cost%kwp max-delta%kw)]
