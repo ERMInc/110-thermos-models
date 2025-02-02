@@ -202,7 +202,7 @@
         log-time  (fn [message]
                     (let [now (System/currentTimeMillis)
                           delta (int (/ (- now time) 1000))]
-                      (log/info "Flow bounds timing: %s (%ds)")))
+                      (log/infof "Flow bounds timing: %s (%ds)" message delta)))
         vertices  (vertex-information problem)
         adjacency (make-adjacency problem vertices)
         inverse   (graph/invert-adjacency-map adjacency)
