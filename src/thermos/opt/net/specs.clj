@@ -81,6 +81,7 @@
     (ds/opt :objective-scale) (ds/maybe number?)
     (ds/opt :objective-precision) (ds/maybe number?)
     (ds/opt :edge-cost-precision) (ds/maybe number?)
+    (ds/opt :no-loops) (ds/maybe boolean?)
     }
    
    )

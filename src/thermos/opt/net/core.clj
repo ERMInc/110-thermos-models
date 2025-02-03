@@ -152,15 +152,10 @@
   "
   [problem & {:keys [objective-scale
                      objective-precision
-                     edge-cost-precision
-                     mean-flow-scale
-                     peak-flow-scale]
+                     edge-cost-precision]
               :or {objective-scale 1.0
-                   objective-precision 10.0
-                   edge-cost-precision 0.05
-                   mean-flow-scale 1.0
-                   peak-flow-scale 1.0}
-              }]
+                   objective-precision 0.0
+                   edge-cost-precision 0.0}}]
   {:pre [(valid? network-problem problem)]}
 
   (let [flow-bounds (or (:bounds problem)
@@ -280,7 +275,8 @@
                                   (* (or (-> (vertices i) :supply :emissions (get e)) 0)
                                      hours-per-year))
         supply-count-max         (:supply-limit problem)
-        
+
+        no-loops                 (:no-loops problem)
 
         vertex-fixed-value   (fn [i] (or (-> (vertices i) :demand :value) 0))
         vertex-value-per-kwp (fn [i] (or (-> (vertices i) :demand (get :value%kwp)) 0))
@@ -375,6 +371,16 @@
                   ]
               [:- [:+ demand flow-out losses] [:+ supply flow-in]])))
 
+        avoided-demand-kwh
+        (->> (for [i dvtx]
+               [i (if (seq ins-types)
+                    [:+ (for [it ins-types] [:INSULATION-KWH i it])]
+                    0.0)])
+             (into {}))
+        
+        ;; wrap in a function so we can return 0 in case nothing there.
+        avoided-demand-kwh #(get avoided-demand-kwh % 0.0)
+        
         total-connection-value
         [:+ (for [i dvtx]
              [:-
@@ -384,11 +390,14 @@
                   (* (demand-kwh i) (vertex-value-per-kwh i))
                   (* (demand-kwp i) (vertex-value-per-kwp i)))]
 
-              ;; we don't get paid for unmet demand
-              ;; we don't want to multiply it by DVIN though, since that's quadratic
-              [:* (unmet-demand i :mean)
+              ;; we don't get paid for unmet demand we don't want to
+              ;; multiply it by DVIN though, since that's quadratic we
+              ;; ignore it when it's definitely zero. this only
+              ;; happens when insulation is affecting this vertex.
+              (when (not= 0.0 (avoided-demand-kwh i))
+                [:* (unmet-demand i :mean)
                  hours-per-year
-                 (vertex-value-per-kwh i)]])]
+                 (vertex-value-per-kwh i)])])]
 
         total-supply-cost
         [:+ (for [i svtx]
@@ -450,15 +459,6 @@
               ;; don't pay for what we didn't use due to insulation
               [:* [:ALT-AVOIDED-KWH i a] (alternative-cost-per-kwh i a)]])]
 
-        avoided-demand-kwh
-        (->> (for [i dvtx]
-               [i (if (seq ins-types)
-                    [:+ (for [it ins-types] [:INSULATION-KWH i it])]
-                    0.0)])
-             (into {}))
-
-        ;; wrap in a function so we can return 0 in case nothing there.
-        avoided-demand-kwh #(get avoided-demand-kwh % 0.0)
 
         ;; Utilities for computing parameters & bounds
         edge-length   (->> (for [[a e] arc-map] [a (:length e)]) (into {}))
@@ -530,6 +530,15 @@
      
      :subject-to
      (list
+      ;; no loops
+      (when no-loops
+        (for [v vtx]
+          [:<=
+           [:+ (for [n (neighbours v)
+                     :when (arc [n v])]
+                 [:AIN [n v]])]
+           1]))
+      
       ;; Flow only goes one way
       (for [e edge]
         [:<= [:+ [:AIN (vec e)] [:AIN (reverse (vec e))]] 1])
@@ -1225,17 +1234,21 @@
                             :or {solver :scip}}]
   {:pre [(#{:scip :gurobi} solver)]}
   (log/info "Solving network problem")
-  (let [mip             (construct-mip problem)
+  (let [objective-scale     (or (:objective-scale problem) 1.0)
+        objective-precision (or (:objective-precision problem) 0.0)
+        edge-cost-precision (or (:edge-cost-precision problem) 0.0)
+
+        mip             (construct-mip problem
+                                       :objective-scale objective-scale
+                                       :objective-precision objective-precision
+                                       :edge-cost-precision edge-cost-precision)
+        
         _               (log/info "Constructed MIP")
         iteration-limit    (:iteration-limit problem 1000)
         time-limit         (:time-limit problem 1.0)
         mip-gap            (:mip-gap problem 0.05)
         param-fix-gap      (:param-gap problem 0)
         should-be-feasible (:should-be-feasible problem false)
-
-        objective-scale     (or (:objective-scale problem) 1.0)
-        objective-precision (or (:objective-precision problem) 0.1)
-        edge-cost-precision (or (:edge-cost-precision problem) 0.0)
         
         start-time      (System/currentTimeMillis)
         end-time (+ (* time-limit 1000 3600) start-time)
@@ -1257,9 +1270,6 @@
 
             solved-mip (solve mip
                               :solver solver
-                              :objective-scale objective-scale
-                              :objective-precision objective-precision
-                              :edge-cost-precision edge-cost-precision
                               :adjust-feastol should-be-feasible
                               :mip-gap mip-gap
                               :time-limit
