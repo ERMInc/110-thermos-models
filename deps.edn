@@ -6,7 +6,7 @@
   org.clojure/tools.logging {:mvn/version "0.4.1"}
   cse/clj-lp
   {:git/url "https://github.com/cse-bristol/clj-lp.git",
-   :sha "46b241c8462c031c883da658b0edf28ced276c3a"}}
+   :sha "c2cd2f5d1d780536f77739482ae4ef6dd8bf0034"}}
 
  :aliases
  {:dev
