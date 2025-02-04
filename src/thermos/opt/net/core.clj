@@ -1072,7 +1072,7 @@
             sol-fix (if (:exists (:solution sol-free))
                       (-> sol-par
                           (fix-decisions)
-                          (run-solver {})
+                          (run-solver {:feasibility-tolerance feastol})
                           (unfix-decisions))
                       sol-free)
             ]
